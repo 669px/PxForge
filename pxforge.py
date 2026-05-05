@@ -3,6 +3,7 @@ import sys
 import json
 import stat
 import asyncio
+import random
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import httpx
@@ -38,22 +39,20 @@ def install_to_path() -> None:
         f"#!/usr/bin/env sh\nexec {sys.executable} {SCRIPT_PATH} \"$@\"\n"
     )
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
     shell_name, rc_file = detect_shell()
     bin_str = str(BIN_DIR)
     rc_file.parent.mkdir(parents=True, exist_ok=True)
     existing = rc_file.read_text() if rc_file.exists() else ""
-
     if bin_str not in existing:
         line = f"fish_add_path {bin_str}" if shell_name == "fish" else f'export PATH="{bin_str}:$PATH"'
         with open(rc_file, "a") as f:
             f.write(f"\n# pxforge\n{line}\n")
-
     print(f"✓ Installed: {wrapper}")
     print(f"✓ PATH entry added to: {rc_file}")
     print(f"\nRestart your shell or run:  source {rc_file}")
     print("Then use:  pxforge            # scans current directory")
     print("           pxforge /some/path # scans given path")
+
 
 IGNORED_DIRS = {
     '.git', 'node_modules', 'dist', 'build', '__pycache__',
@@ -68,6 +67,7 @@ IGNORED_EXT = {
 }
 BINARY_MARKERS = {b'\x7fELF', b'\x89PNG', b'\xff\xd8\xff\xe0', b'%PDF-1.', b'PK\x03\x04'}
 CHUNK_SIZE = 4000
+MIN_CONTENT_LEN = 20
 
 PROVIDER_KEYS = {
     "OpenAI": "openai_key",
@@ -86,18 +86,29 @@ PROVIDER_ENV = {
 PROVIDER_MODELS = {
     "OpenAI": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
     "Anthropic (Claude)": [
-        "claude-opus-4-5",
-        "claude-sonnet-4-5",
-        "claude-haiku-4-5",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5-20251001",
         "claude-3-5-sonnet-20241022",
     ],
-    "Groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+    "Groq": [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "gemma2-9b-it",
+    ],
     "OpenRouter": [
         "meta-llama/llama-3.3-70b-instruct",
         "openai/gpt-4o",
         "anthropic/claude-3.5-sonnet",
         "google/gemini-2.0-flash-001",
     ],
+}
+
+PROVIDER_CONCURRENCY = {
+    "OpenAI": 8,
+    "Anthropic (Claude)": 5,
+    "Groq": 3,
+    "OpenRouter": 5,
 }
 
 APP_CSS = """
@@ -114,8 +125,6 @@ Header {
 Footer {
     background: $primary-darken-2;
 }
-
-/* ── Dir Select ─────────────────────────────────────── */
 
 #dir_select_container {
     width: 100%;
@@ -147,8 +156,6 @@ Footer {
     align: right middle;
     margin-top: 1;
 }
-
-/* ── Settings ───────────────────────────────────────── */
 
 #settings_container {
     width: 100%;
@@ -196,8 +203,6 @@ Footer {
     margin-top: 2;
 }
 
-/* ── Progress ───────────────────────────────────────── */
-
 #progress_container {
     width: 100%;
     height: 100%;
@@ -221,18 +226,11 @@ Footer {
     padding: 0 1;
 }
 
-/* ── Output ─────────────────────────────────────────── */
-
-#output_outer {
-    width: 100%;
-    height: 1fr;
-    padding: 0 2;
-}
-
 #scroll_area {
-    height: 100%;
+    height: 1fr;
     border: round $primary;
     background: $surface-darken-1;
+    margin: 0 2;
 }
 
 #output_text {
@@ -243,8 +241,7 @@ Footer {
     height: 3;
     align: right middle;
     padding: 0 2;
-    margin-top: 1;
-    margin-bottom: 1;
+    margin: 1 0;
 }
 
 Button {
@@ -253,7 +250,7 @@ Button {
 """
 
 
-def load_config() -> Dict[str, str]:
+def load_config() -> Dict[str, Any]:
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         if CONFIG_FILE.exists():
@@ -264,7 +261,7 @@ def load_config() -> Dict[str, str]:
     return {}
 
 
-def save_config(config: Dict[str, str]) -> None:
+def save_config(config: Dict[str, Any]) -> None:
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_FILE, "w") as f:
@@ -272,8 +269,6 @@ def save_config(config: Dict[str, str]) -> None:
     except Exception:
         pass
 
-
-API_CONCURRENCY = 8
 
 SYSTEM_ANALYST = """\
 You are an expert code analyst embedded in pxForge, a tool that generates AI-ready project context documents.
@@ -338,6 +333,7 @@ class LLMClient:
         "Groq": "https://api.groq.com/openai/v1/chat/completions",
         "OpenRouter": "https://openrouter.ai/api/v1/chat/completions",
     }
+    MAX_RETRIES = 4
 
     def __init__(self, provider: str, api_key: str, model: str, mode: str):
         self.provider = provider
@@ -383,12 +379,33 @@ class LLMClient:
         return choices[0].get("message", {}).get("content", "") if choices else ""
 
     async def generate(self, prompt: str, system: str = SYSTEM_ANALYST) -> str:
-        url = self.URLS.get(self.provider, "")
+        url = self.URLS.get(self.provider)
         if not url:
             raise ValueError(f"Unknown provider: {self.provider}")
-        resp = await self._http.post(url, headers=self._headers(), json=self._payload(prompt, system))
-        resp.raise_for_status()
-        return self._extract(resp.json())
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                resp = await self._http.post(
+                    url, headers=self._headers(), json=self._payload(prompt, system)
+                )
+                if resp.status_code == 429:
+                    wait = (2 ** attempt) + random.uniform(0, 1)
+                    await asyncio.sleep(wait)
+                    last_exc = Exception(f"Rate limited (429), retrying after {wait:.1f}s")
+                    continue
+                resp.raise_for_status()
+                return self._extract(resp.json())
+            except httpx.TimeoutException as exc:
+                last_exc = exc
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(2 ** attempt)
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                if exc.response.status_code >= 500 and attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise
+        raise last_exc or RuntimeError("Max retries exceeded")
 
 
 def _listdir_filtered(dirpath: str) -> List[Tuple[str, str, bool]]:
@@ -422,7 +439,7 @@ def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
 
 class ProjectScanner:
     async def scan(self, path: str, log: RichLog) -> Tuple[str, List[Dict[str, Any]]]:
-        log.write(f"Walking directory tree...")
+        log.write("Walking directory tree...")
         tree_lines, files = await self._walk(path, "")
         return "\n".join(tree_lines), files
 
@@ -430,7 +447,7 @@ class ProjectScanner:
         entries = await asyncio.to_thread(_listdir_filtered, dirpath)
         tree_lines: List[str] = []
         file_paths: List[str] = []
-        subdir_tasks: List[Tuple[int, Any]] = []
+        subdir_tasks: List[Tuple[int, str, str]] = []
 
         for i, (name, full_path, is_dir) in enumerate(entries):
             is_last = i == len(entries) - 1
@@ -451,7 +468,7 @@ class ProjectScanner:
 
         if subdir_tasks:
             sub_results = await asyncio.gather(
-                *[self._walk(full_path, child_prefix) for _, full_path, child_prefix in subdir_tasks]
+                *[self._walk(fp, cp) for _, fp, cp in subdir_tasks]
             )
             final_lines = list(tree_lines)
             offset = 0
@@ -469,7 +486,7 @@ class FileAnalyzer:
     def __init__(self, client: LLMClient, log: RichLog):
         self.client = client
         self.log = log
-        self._sem = asyncio.Semaphore(API_CONCURRENCY)
+        self._sem = asyncio.Semaphore(PROVIDER_CONCURRENCY.get(client.provider, 5))
 
     async def analyze(
         self,
@@ -481,12 +498,14 @@ class FileAnalyzer:
 
         async def process(f: Dict[str, Any], idx: int) -> None:
             name = os.path.basename(f["path"])
-            if f["is_binary"] or f["content"] is None:
-                results[f["path"]] = f"[{f['type'].upper() or 'BINARY'}] {f['path']}"
+            content = f.get("content") or ""
+
+            if f["is_binary"] or len(content.strip()) < MIN_CONTENT_LEN:
+                label = "BINARY" if f["is_binary"] else "SKIPPED"
+                results[f["path"]] = f"[{label}] {f['path']}"
                 on_progress(idx + 1, total)
                 return
 
-            content = f["content"]
             chunks = [content[i:i + CHUNK_SIZE] for i in range(0, len(content), CHUNK_SIZE)]
 
             async def analyze_chunk(ci: int, chunk: str) -> str:
@@ -508,7 +527,7 @@ class FileAnalyzer:
             ) if s]
 
             if not summaries:
-                results[f["path"]] = f"[NO CONTENT] {f['path']}"
+                results[f["path"]] = f"[FAILED] {f['path']}"
             elif len(summaries) == 1:
                 results[f["path"]] = summaries[0]
             else:
@@ -540,11 +559,14 @@ class PromptBuilder:
         file_summaries: Dict[str, str],
         client: LLMClient,
         log: RichLog,
+        base_path: str = "",
     ) -> str:
         log.write("Generating project summary...")
-        ctx_lines = [
-            f"{os.path.basename(p)}: {s}" for p, s in file_summaries.items()
-        ]
+
+        def rel(p: str) -> str:
+            return os.path.relpath(p, base_path) if base_path else os.path.basename(p)
+
+        ctx_lines = [f"{rel(p)}: {s}" for p, s in file_summaries.items()]
         ctx = "\n".join(ctx_lines)
         if len(ctx) > self.MAX_CTX_CHARS:
             ctx = ctx[:self.MAX_CTX_CHARS] + "\n...[truncated]"
@@ -555,13 +577,15 @@ class PromptBuilder:
             f"Tree:\n{tree}\n\nFiles:\n{ctx}",
             system=SYSTEM_ARCHITECT,
         )
+
         key_sections: List[str] = []
         other_lines: List[str] = []
         for p, s in file_summaries.items():
+            r = rel(p)
             if s.startswith("["):
-                other_lines.append(f"{p}: {s}")
+                other_lines.append(f"{r}: {s}")
             else:
-                key_sections.append(f"### {p}\n{s}")
+                key_sections.append(f"### {r}\n{s}")
 
         body = (
             f"# PROJECT SUMMARY\n{project_summary}\n\n"
@@ -572,10 +596,10 @@ class PromptBuilder:
             body += "\n\n# OTHER FILES\n" + "\n".join(other_lines)
 
         log.write("Building final AI-ready prompt...")
-        final_prompt_input = body if len(body) <= self.MAX_CTX_CHARS else body[:self.MAX_CTX_CHARS] + "\n...[truncated]"
+        ctx_for_prompt = body if len(body) <= self.MAX_CTX_CHARS else body[:self.MAX_CTX_CHARS] + "\n...[truncated]"
         final_prompt = await client.generate(
             "Generate a comprehensive, AI-ready system prompt for a developer assistant "
-            "working on this project. Base it on the context below.\n\n" + final_prompt_input,
+            "working on this project. Base it on the context below.\n\n" + ctx_for_prompt,
             system=SYSTEM_PROMPT_ENGINEER,
         )
         return body + f"\n\n# AI SYSTEM PROMPT\n{final_prompt}"
@@ -613,9 +637,12 @@ class DirSelectScreen(Screen):
 
 class SettingsScreen(Screen):
     def compose(self) -> ComposeResult:
-        providers = [(p, p) for p in PROVIDER_MODELS]
         current_provider = self.app.state["provider"]
-        models = [(m, m) for m in PROVIDER_MODELS[current_provider]]
+        current_model = self.app.state["model"]
+        providers = [(p, p) for p in PROVIDER_MODELS]
+        provider_models = PROVIDER_MODELS[current_provider]
+        models = [(m, m) for m in provider_models]
+        default_model = current_model if current_model in provider_models else provider_models[0]
         scan_path = self.app.state["path"]
         yield Header()
         yield ScrollableContainer(
@@ -624,9 +651,13 @@ class SettingsScreen(Screen):
                 Label("Provider:"),
                 Select(providers, value=current_provider, id="sel_provider"),
                 Label("API Key:"),
-                Input(placeholder="Enter API key (or leave blank to use saved/env)", id="inp_key", password=True),
+                Input(
+                    placeholder="Enter API key (or leave blank to use saved/env)",
+                    id="inp_key",
+                    password=True,
+                ),
                 Label("Model:"),
-                Select(models, value=PROVIDER_MODELS[current_provider][0], id="sel_model"),
+                Select(models, value=default_model, id="sel_model"),
                 Label("Mode:"),
                 Horizontal(
                     Label("Fast"),
@@ -657,6 +688,8 @@ class SettingsScreen(Screen):
             self.query_one("#inp_key", Input).value = key
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.value is Select.BLANK:
+            return
         if event.select.id == "sel_provider":
             provider = str(event.value)
             self.app.state["provider"] = provider
@@ -675,7 +708,7 @@ class SettingsScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_back":
-            if self.app.screen_stack and len(self.app.screen_stack) > 1:
+            if len(self.app.screen_stack) > 1:
                 self.app.pop_screen()
             else:
                 self.app.exit()
@@ -687,6 +720,9 @@ class SettingsScreen(Screen):
             self.app.state["api_key"] = key
             config = load_config()
             config[PROVIDER_KEYS.get(self.app.state["provider"], "")] = key
+            config["last_provider"] = self.app.state["provider"]
+            config["last_model"] = self.app.state["model"]
+            config["last_mode"] = self.app.state["mode"]
             save_config(config)
             self.app.push_screen(ProgressScreen())
 
@@ -708,56 +744,61 @@ class ProgressScreen(Screen):
     async def _run_scan(self) -> None:
         log = self.query_one("#scan_log", RichLog)
         prog = self.query_one("#prog_bar", ProgressBar)
+        lbl = self.query_one("#progress_label", Label)
         state = self.app.state
+        client: Optional[LLMClient] = None
 
-        client = LLMClient(state["provider"], state["api_key"], state["model"], state["mode"])
+        try:
+            client = LLMClient(state["provider"], state["api_key"], state["model"], state["mode"])
 
-        log.write(f"[bold]Scanning:[/bold] {state['path']}")
-        scanner = ProjectScanner()
-        tree, files = await scanner.scan(state["path"], log)
-        log.write(f"Found [bold]{len(files)}[/bold] files to process.")
-        prog.advance(5)
+            log.write(f"[bold]Scanning:[/bold] {state['path']}")
+            scanner = ProjectScanner()
+            tree, files = await scanner.scan(state["path"], log)
+            log.write(f"Found [bold]{len(files)}[/bold] files.")
+            prog.advance(5)
 
-        analyzable = [f for f in files if not f["is_binary"] and f["content"] is not None]
-
-        if analyzable:
-            file_progress_budget = 75.0
+            file_step = 75.0 / max(len(files), 1)
 
             def on_file_progress(done: int, total: int) -> None:
-                prog.advance(file_progress_budget / total)
+                prog.advance(file_step)
+
+            analyzable_count = sum(
+                1 for f in files
+                if not f["is_binary"] and len((f.get("content") or "").strip()) >= MIN_CONTENT_LEN
+            )
+            log.write(f"Analyzing [bold]{analyzable_count}[/bold] text files...")
 
             analyzer = FileAnalyzer(client, log)
             file_summaries = await analyzer.analyze(files, on_file_progress)
-        else:
-            log.write("No text files to analyze.")
-            prog.advance(75)
-            file_summaries = {
-                f["path"]: f"[{f['type'].upper() or 'BINARY'}] {f['path']}" for f in files
-            }
 
-        log.write("Building final prompt...")
-        builder = PromptBuilder()
-        final_output = await builder.build(tree, file_summaries, client, log)
+            if not files:
+                prog.advance(75)
 
-        state["output"] = final_output
-        state["output_dir"] = state["path"]
-        prog.advance(20)
-        await client.close()
+            log.write("Building final prompt...")
+            builder = PromptBuilder()
+            final_output = await builder.build(tree, file_summaries, client, log, state["path"])
 
-        log.write("[bold green]✓ Complete.[/bold green]")
-        await asyncio.sleep(0.6)
-        self.app.push_screen(OutputScreen())
+            state["output"] = final_output
+            state["output_dir"] = state["path"]
+            prog.advance(20)
+            log.write("[bold green]✓ Complete.[/bold green]")
+            await asyncio.sleep(0.5)
+            self.app.push_screen(OutputScreen())
+
+        except Exception as e:
+            log.write(f"[bold red]✗ Error: {e}[/bold red]")
+            lbl.update(f"Failed: {type(e).__name__} — {e}")
+        finally:
+            if client:
+                await client.close()
 
 
 class OutputScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Container(
-            ScrollableContainer(
-                Static(id="output_text", markup=False),
-                id="scroll_area",
-            ),
-            id="output_outer",
+        yield ScrollableContainer(
+            Static(id="output_text", markup=False),
+            id="scroll_area",
         )
         yield Horizontal(
             Button("Save to File", variant="success", id="btn_save"),
@@ -793,17 +834,30 @@ class OutputScreen(Screen):
         import subprocess
         try:
             if sys.platform == "darwin":
-                proc = subprocess.run(["pbcopy"], input=content, text=True)
-            elif sys.platform == "win32":
-                proc = subprocess.run(["clip"], input=content, text=True, shell=True)
-            else:
-                proc = subprocess.run(["xclip", "-selection", "clipboard"], input=content, text=True)
-            if proc.returncode == 0:
+                subprocess.run(["pbcopy"], input=content, text=True, check=True)
                 self.notify("Copied to clipboard.", severity="information")
-            else:
-                self.notify("Clipboard copy failed.", severity="error")
-        except FileNotFoundError:
-            self.notify("Clipboard tool not found (install xclip on Linux).", severity="error")
+                return
+            if sys.platform == "win32":
+                subprocess.run(["clip"], input=content, text=True, shell=True, check=True)
+                self.notify("Copied to clipboard.", severity="information")
+                return
+            for cmd in [
+                ["wl-copy"],
+                ["xclip", "-selection", "clipboard"],
+                ["xsel", "--clipboard", "--input"],
+            ]:
+                try:
+                    subprocess.run(cmd, input=content, text=True, check=True)
+                    self.notify("Copied to clipboard.", severity="information")
+                    return
+                except FileNotFoundError:
+                    continue
+            self.notify(
+                "No clipboard tool found. Install wl-copy, xclip, or xsel.",
+                severity="warning",
+            )
+        except subprocess.CalledProcessError as e:
+            self.notify(f"Clipboard copy failed: {e}", severity="error")
         except Exception as e:
             self.notify(f"Clipboard error: {e}", severity="error")
 
@@ -817,13 +871,20 @@ class pxForgeApp(App):
         super().__init__()
         self.start_path = start_path
         resolved = start_path or str(Path.cwd())
+        config = load_config()
+        saved_provider = config.get("last_provider", "OpenAI")
+        if saved_provider not in PROVIDER_MODELS:
+            saved_provider = "OpenAI"
+        saved_model = config.get("last_model", PROVIDER_MODELS[saved_provider][0])
+        if saved_model not in PROVIDER_MODELS.get(saved_provider, []):
+            saved_model = PROVIDER_MODELS[saved_provider][0]
         self.state: Dict[str, Any] = {
             "path": resolved,
             "output_dir": resolved,
-            "provider": "OpenAI",
+            "provider": saved_provider,
             "api_key": "",
-            "model": "gpt-4o",
-            "mode": "fast",
+            "model": saved_model,
+            "mode": config.get("last_mode", "fast"),
             "output": "",
         }
 
@@ -837,7 +898,7 @@ class pxForgeApp(App):
 if __name__ == "__main__":
     args = sys.argv[1:]
 
-    if args and args[0] in ("install",):
+    if args and args[0] == "install":
         install_to_path()
         sys.exit(0)
 

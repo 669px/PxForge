@@ -12,10 +12,9 @@ import httpx
 from textual.app import App, ComposeResult, Screen
 from textual.widgets import (
     Header, Footer, DirectoryTree, Input, Select, Switch, Label,
-    ProgressBar, RichLog, Button, Static, Collapsible, RadioSet, RadioButton
+    ProgressBar, RichLog, Button, Static,
 )
 from textual.containers import Container, Horizontal, ScrollableContainer, Vertical
-from textual.reactive import reactive
 from textual.binding import Binding
 
 CONFIG_DIR = Path.home() / ".pxforge"
@@ -32,6 +31,9 @@ AI_BROWSER_SERVICES = {
     "Mistral": "https://chat.mistral.ai",
     "DeepSeek": "https://chat.deepseek.com",
 }
+
+AI_SERVICE_KEYS = list(AI_BROWSER_SERVICES.keys())
+
 
 def detect_shell() -> Tuple[str, Path]:
     shell = os.environ.get("SHELL", "")
@@ -70,8 +72,8 @@ def install_to_path() -> None:
 IGNORED_DIRS = {
     '.git', 'node_modules', 'dist', 'build', '__pycache__',
     '.venv', 'env', 'venv', '.next', '.nuxt', 'coverage', '.cache',
-    '.idea', '.vscode', '.DS_Store', 'target', 'out', '.gradle',
-    '.mypy_cache', '.pytest_cache', '.ruff_cache', 'vendor'
+    '.idea', '.vscode', 'target', 'out', '.gradle',
+    '.mypy_cache', '.pytest_cache', '.ruff_cache', 'vendor',
 }
 IGNORED_EXT = {
     '.pyc', '.pyo', '.exe', '.dll', '.so', '.dylib', '.whl',
@@ -79,10 +81,13 @@ IGNORED_EXT = {
     '.bin', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
     '.pdf', '.mp3', '.mp4', '.avi', '.lock', '.bmp', '.webp',
     '.tiff', '.wav', '.ogg', '.flac', '.ttf', '.woff', '.woff2', '.eot',
-    '.class', '.o', '.a', '.lib', '.pdb', '.map', '.min.js', '.min.css',
-    '.DS_Store', '.suo', '.user', '.orig', '.rej',
+    '.class', '.o', '.a', '.lib', '.pdb', '.map',
+    '.suo', '.user', '.orig', '.rej',
 }
-BINARY_MARKERS = {b'\x7fELF', b'\x89PNG', b'\xff\xd8\xff\xe0', b'%PDF-1.', b'PK\x03\x04', b'\x00\x00\x00\x00'}
+BINARY_MARKERS = (
+    b'\x7fELF', b'\x89PNG', b'\xff\xd8\xff',
+    b'%PDF-1.', b'PK\x03\x04', b'GIF8',
+)
 CHUNK_SIZE = 6000
 MIN_CONTENT_LEN = 20
 MAX_FILE_SIZE_BYTES = 500_000
@@ -101,7 +106,7 @@ PROVIDER_ENV = {
     "OpenRouter": "OPENROUTER_API_KEY",
 }
 
-PROVIDER_MODELS = {
+PROVIDER_MODELS: Dict[str, List[str]] = {
     "OpenAI": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3-mini"],
     "Anthropic (Claude)": [
         "claude-sonnet-4-20250514",
@@ -124,6 +129,8 @@ PROVIDER_MODELS = {
     ],
 }
 
+PROVIDER_NAMES: List[str] = list(PROVIDER_MODELS.keys())
+
 PROVIDER_CONCURRENCY = {
     "OpenAI": 8,
     "Anthropic (Claude)": 5,
@@ -135,110 +142,106 @@ APP_CSS = """
 Screen {
     background: $surface;
 }
-
 Header {
     background: $primary;
     color: $text;
     text-style: bold;
 }
-
 Footer {
     background: $primary-darken-2;
 }
 
+/* ── Dir Select ── */
 #dir_select_container {
     width: 100%;
     height: 100%;
     padding: 1 2;
 }
-
 #dir_label {
+    height: 1;
     margin-bottom: 1;
     text-style: bold;
     color: $accent;
 }
-
 #dir_tree {
     height: 1fr;
     border: round $primary;
     background: $surface-darken-1;
     margin-bottom: 1;
 }
-
 #dir_selected_label {
+    height: 1;
     color: $text-muted;
     margin-bottom: 1;
     padding: 0 1;
 }
-
 #dir_buttons {
     height: 3;
     align: right middle;
     margin-top: 1;
 }
 
-#settings_container {
+/* ── Settings ── */
+#settings_scroll {
     width: 100%;
     height: 100%;
+}
+#settings_inner {
+    width: 100%;
+    height: auto;
     padding: 1 2;
 }
-
 #lbl_path {
+    height: 1;
     color: $accent;
     text-style: bold italic;
     margin-bottom: 1;
     padding: 0 1;
     border-left: thick $accent;
 }
-
-#settings_container Label {
+#settings_inner Label {
+    height: 1;
     margin-top: 1;
     color: $text-muted;
     text-style: bold;
 }
-
-#settings_container Select {
+#settings_inner Select {
     margin-bottom: 0;
 }
-
-#settings_container Input {
+#settings_inner Input {
     margin-bottom: 0;
 }
-
 #mode_row {
     height: 3;
     align: left middle;
     margin-top: 1;
     margin-bottom: 1;
 }
-
 #mode_row Label {
     margin: 0 1;
     color: $text;
 }
-
 #settings_buttons {
     height: 3;
     align: right middle;
     margin-top: 2;
 }
 
+/* ── Progress ── */
 #progress_container {
     width: 100%;
     height: 100%;
     padding: 1 2;
 }
-
 #progress_label {
+    height: 1;
     text-style: bold;
     color: $accent;
     margin-bottom: 1;
 }
-
 #prog_bar {
     margin-bottom: 1;
 }
-
 #scan_log {
     height: 1fr;
     border: round $primary;
@@ -246,72 +249,67 @@ Footer {
     padding: 0 1;
 }
 
+/* ── Output ── */
+#output_section {
+    width: 100%;
+    height: 100%;
+}
+#stats_bar {
+    height: 1;
+    color: $text-muted;
+    padding: 0 2;
+}
+#token_label {
+    height: 1;
+    color: $warning;
+    padding: 0 2;
+    text-style: italic;
+    margin-bottom: 1;
+}
 #scroll_area {
     height: 1fr;
     border: round $primary;
     background: $surface-darken-1;
     margin: 0 2;
 }
-
 #output_text {
     padding: 1 2;
 }
-
-#output_buttons {
-    height: auto;
-    align: right middle;
-    padding: 0 2;
-    margin: 1 0;
-}
-
-#ai_open_row {
-    height: auto;
-    align: left middle;
-    padding: 0 2;
-    margin-bottom: 1;
-    width: 100%;
-}
-
-#ai_open_label {
-    color: $text-muted;
-    text-style: bold;
-    padding: 0 1;
-    margin-right: 1;
-}
-
-.ai_btn {
-    margin-left: 1;
-    min-width: 12;
-}
-
-#stats_bar {
-    color: $text-muted;
-    padding: 0 2;
-    margin-bottom: 1;
-    height: 1;
-}
-
-Button {
-    margin-left: 1;
-}
-
-#output_section {
-    height: 100%;
-    width: 100%;
-}
-
 #bottom_panel {
     height: auto;
     width: 100%;
-    border-top: solid $primary;
-    padding-top: 1;
+    border-top: solid $primary-darken-1;
+    padding: 1 0 0 0;
 }
-
-#token_label {
-    color: $warning;
+#ai_open_row {
+    height: 3;
+    align: left middle;
     padding: 0 2;
-    margin-bottom: 1;
-    text-style: italic;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-size: 0 0;
+}
+#ai_open_label {
+    height: 3;
+    color: $text-muted;
+    text-style: bold;
+    width: auto;
+    content-align: left middle;
+    padding: 0 1 0 0;
+}
+.ai_btn {
+    margin: 0 1 0 0;
+    min-width: 11;
+    height: 3;
+}
+#output_buttons {
+    height: 3;
+    align: right middle;
+    padding: 0 2;
+    margin-top: 1;
+}
+Button {
+    margin-left: 1;
 }
 """
 
@@ -440,7 +438,7 @@ class LLMClient:
             return {**base, "x-api-key": self.api_key, "anthropic-version": "2023-06-01"}
         if self.provider == "OpenRouter":
             return {**base, "Authorization": f"Bearer {self.api_key}",
-                    "HTTP-Referer": "https://github.com/pxforge", "X-Title": "pxForge"}
+                    "HTTP-Referer": "https://github.com/669px/pxforge", "X-Title": "pxForge"}
         return {**base, "Authorization": f"Bearer {self.api_key}"}
 
     def _payload(self, prompt: str, system: str) -> Dict[str, Any]:
@@ -468,8 +466,7 @@ class LLMClient:
         choices = data.get("choices", [])
         if not choices:
             return ""
-        msg = choices[0].get("message", {})
-        return msg.get("content", "") or ""
+        return choices[0].get("message", {}).get("content", "") or ""
 
     async def generate(self, prompt: str, system: str = SYSTEM_ANALYST) -> str:
         url = self.URLS.get(self.provider)
@@ -484,9 +481,9 @@ class LLMClient:
                 if resp.status_code == 429:
                     wait = min((2 ** attempt) + random.uniform(0, 1), 30.0)
                     await asyncio.sleep(wait)
-                    last_exc = Exception(f"Rate limited (429), retried after {wait:.1f}s")
+                    last_exc = Exception(f"Rate limited (429)")
                     continue
-                if resp.status_code in (503, 502, 500):
+                if resp.status_code in (500, 502, 503):
                     if attempt < self.MAX_RETRIES - 1:
                         await asyncio.sleep(2 ** attempt)
                         continue
@@ -519,8 +516,6 @@ def _listdir_filtered(dirpath: str) -> List[Tuple[str, str, bool]]:
         return []
     result = []
     for entry in entries:
-        if entry.name.startswith('.') and entry.name in IGNORED_DIRS:
-            continue
         if entry.name in IGNORED_DIRS:
             continue
         ext = Path(entry.name).suffix.lower()
@@ -535,8 +530,10 @@ def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
     try:
         size = os.path.getsize(filepath)
         if size > MAX_FILE_SIZE_BYTES:
-            return {"path": filepath, "type": ext, "is_binary": False,
-                    "content": None, "skipped": True, "reason": f"file too large ({size // 1024}KB)"}
+            return {
+                "path": filepath, "type": ext, "is_binary": False,
+                "content": None, "skipped": True, "reason": f"too large ({size // 1024}KB)",
+            }
         with open(filepath, "rb") as f:
             header = f.read(16)
         if any(header.startswith(m) for m in BINARY_MARKERS):
@@ -547,8 +544,10 @@ def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
             content = f.read()
         return {"path": filepath, "type": ext, "is_binary": False, "content": content, "skipped": False}
     except PermissionError:
-        return {"path": filepath, "type": ext, "is_binary": False,
-                "content": None, "skipped": True, "reason": "permission denied"}
+        return {
+            "path": filepath, "type": ext, "is_binary": False,
+            "content": None, "skipped": True, "reason": "permission denied",
+        }
     except Exception:
         return None
 
@@ -618,13 +617,13 @@ class FileAnalyzer:
 
             if f.get("skipped"):
                 reason = f.get("reason", "skipped")
-                results[f["path"]] = f"[SKIPPED:{reason}] {f['path']}"
+                results[f["path"]] = f"[SKIPPED:{reason}]"
                 on_progress(idx + 1, total)
                 return
 
             if f["is_binary"] or len(content.strip()) < MIN_CONTENT_LEN:
                 label = "BINARY" if f["is_binary"] else "SKIPPED:empty"
-                results[f["path"]] = f"[{label}] {f['path']}"
+                results[f["path"]] = f"[{label}]"
                 on_progress(idx + 1, total)
                 return
 
@@ -644,7 +643,7 @@ class FileAnalyzer:
                     try:
                         return await self.client.generate(prompt, system=SYSTEM_ANALYST)
                     except Exception as e:
-                        self.log.write(f"  [red][!] {name} chunk {ci+1}: {e}[/red]")
+                        self.log.write(f"  [red][!] {name}: {e}[/red]")
                         return ""
 
             summaries = [s for s in await asyncio.gather(
@@ -652,14 +651,13 @@ class FileAnalyzer:
             ) if s.strip()]
 
             if not summaries:
-                results[f["path"]] = f"[FAILED] {f['path']}"
+                results[f["path"]] = "[FAILED]"
             elif len(summaries) == 1:
                 results[f["path"]] = summaries[0]
             else:
                 self.log.write(f"  [yellow]Merging {len(summaries)} chunks for {name}[/yellow]")
                 merge_prompt = (
-                    "Merge these partial analyses of the same file into one coherent summary. "
-                    "File: " + name + "\n"
+                    f"Merge these partial analyses of '{name}' into one coherent summary.\n"
                     "Preserve: Purpose, Key functions/classes, Dependencies, Important logic.\n\n"
                     + "\n---\n".join(summaries)
                 )
@@ -703,21 +701,17 @@ class PromptBuilder:
         if len(ctx) > self.MAX_CTX_CHARS:
             ctx = ctx[:self.MAX_CTX_CHARS] + "\n...[truncated for context window]"
 
-        tree_for_summary = tree
-        if len(tree) > 10_000:
-            tree_for_summary = tree[:10_000] + "\n...[tree truncated]"
+        tree_for_summary = tree if len(tree) <= 10_000 else tree[:10_000] + "\n...[tree truncated]"
 
         project_summary = await client.generate(
             "Analyze the project structure and file summaries below. "
-            "Write a concise PROJECT SUMMARY covering: technology stack, architecture, core functionality, and key design patterns.\n\n"
+            "Write a concise PROJECT SUMMARY covering: technology stack, architecture, "
+            "core functionality, and key design patterns.\n\n"
             f"Directory Tree:\n{tree_for_summary}\n\nFile Analyses:\n{ctx}",
             system=SYSTEM_ARCHITECT,
         )
 
-        key_sections: List[str] = []
-        for p, s in valid_summaries.items():
-            key_sections.append(f"### {rel(p)}\n{s}")
-
+        key_sections = [f"### {rel(p)}\n{s}" for p, s in valid_summaries.items()]
         other_lines = [f"{rel(p)}: {s}" for p, s in skipped_summaries.items()]
 
         body = (
@@ -732,16 +726,16 @@ class PromptBuilder:
         ctx_for_prompt = body if len(body) <= self.MAX_CTX_CHARS else body[:self.MAX_CTX_CHARS] + "\n...[truncated]"
         final_prompt = await client.generate(
             "Generate a comprehensive, immediately-usable AI system prompt for a developer assistant "
-            "working on this exact project. Be specific. Base it on the full context below.\n\n" + ctx_for_prompt,
+            "working on this exact project. Be specific to this codebase.\n\n" + ctx_for_prompt,
             system=SYSTEM_PROMPT_ENGINEER,
         )
 
-        stats = (
-            f"<!-- pxForge Stats: {len(valid_summaries)} files analyzed, "
-            f"{len(skipped_summaries)} skipped, "
+        stats_comment = (
+            f"<!-- pxForge | files analyzed: {len(valid_summaries)} | "
+            f"skipped: {len(skipped_summaries)} | "
             f"~{estimate_tokens(body):,} tokens -->"
         )
-        return body + f"\n\n# AI SYSTEM PROMPT\n{final_prompt}\n\n{stats}"
+        return body + f"\n\n# AI SYSTEM PROMPT\n{final_prompt}\n\n{stats_comment}"
 
 
 class DirSelectScreen(Screen):
@@ -775,23 +769,36 @@ class DirSelectScreen(Screen):
 
 
 class SettingsScreen(Screen):
+
+    def _safe_provider(self) -> str:
+        p = self.app.state.get("provider", "")
+        return p if p in PROVIDER_MODELS else PROVIDER_NAMES[0]
+
+    def _safe_model(self, provider: str) -> str:
+        models = PROVIDER_MODELS.get(provider, [])
+        saved = self.app.state.get("model", "")
+        return saved if saved in models else (models[0] if models else "")
+
+    def _safe_preferred_ai(self) -> str:
+        ai = self.app.state.get("preferred_ai", "Claude")
+        return ai if ai in AI_BROWSER_SERVICES else AI_SERVICE_KEYS[0]
+
     def compose(self) -> ComposeResult:
-        current_provider = self.app.state["provider"]
-        current_model = self.app.state["model"]
-        providers = [(p, p) for p in PROVIDER_MODELS]
-        provider_models = PROVIDER_MODELS.get(current_provider, [])
-        if not provider_models:
-            current_provider = "OpenAI"
-            provider_models = PROVIDER_MODELS["OpenAI"]
-        models = [(m, m) for m in provider_models]
-        default_model = current_model if current_model in provider_models else provider_models[0]
-        scan_path = self.app.state["path"]
+        provider = self._safe_provider()
+        model = self._safe_model(provider)
+        preferred_ai = self._safe_preferred_ai()
+        scan_path = self.app.state.get("path", str(Path.cwd()))
+
         yield Header()
         yield ScrollableContainer(
             Vertical(
                 Label(f"Scanning: {scan_path}", id="lbl_path"),
                 Label("Provider:"),
-                Select(providers, value=current_provider, id="sel_provider"),
+                Select(
+                    [(p, p) for p in PROVIDER_NAMES],
+                    value=provider,
+                    id="sel_provider",
+                ),
                 Label("API Key:"),
                 Input(
                     placeholder="Enter API key (or leave blank to use saved/env)",
@@ -799,18 +806,22 @@ class SettingsScreen(Screen):
                     password=True,
                 ),
                 Label("Model:"),
-                Select(models, value=default_model, id="sel_model"),
+                Select(
+                    [(m, m) for m in PROVIDER_MODELS[provider]],
+                    value=model,
+                    id="sel_model",
+                ),
                 Label("Mode:"),
                 Horizontal(
                     Label("Fast"),
-                    Switch(value=self.app.state["mode"] == "high_quality", id="sw_mode"),
+                    Switch(value=self.app.state.get("mode") == "high_quality", id="sw_mode"),
                     Label("High Quality"),
                     id="mode_row",
                 ),
                 Label("Preferred AI for viewing output:"),
                 Select(
-                    [(name, name) for name in AI_BROWSER_SERVICES],
-                    value=self.app.state.get("preferred_ai", "Claude"),
+                    [(name, name) for name in AI_SERVICE_KEYS],
+                    value=preferred_ai,
                     id="sel_preferred_ai",
                 ),
                 Horizontal(
@@ -818,8 +829,9 @@ class SettingsScreen(Screen):
                     Button("Start Scan", variant="primary", id="btn_start"),
                     id="settings_buttons",
                 ),
-                id="settings_container",
-            )
+                id="settings_inner",
+            ),
+            id="settings_scroll",
         )
         yield Footer()
 
@@ -827,31 +839,42 @@ class SettingsScreen(Screen):
         self._load_saved_key()
 
     def _load_saved_key(self) -> None:
-        provider = self.app.state["provider"]
+        provider = self.app.state.get("provider", "")
         config = load_config()
-        key_field = PROVIDER_KEYS.get(provider, "")
-        key = config.get(key_field, "")
+        key = config.get(PROVIDER_KEYS.get(provider, ""), "")
         if not key:
             key = os.getenv(PROVIDER_ENV.get(provider, ""), "")
         if key:
-            self.query_one("#inp_key", Input).value = key
+            try:
+                self.query_one("#inp_key", Input).value = key
+            except Exception:
+                pass
+
+    def _update_model_select(self, provider: str) -> None:
+        models = PROVIDER_MODELS.get(provider, [])
+        try:
+            sel = self.query_one("#sel_model", Select)
+            sel.set_options([(m, m) for m in models])
+            if models:
+                sel.value = models[0]
+                self.app.state["model"] = models[0]
+        except Exception:
+            pass
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.value is Select.BLANK:
             return
         sel_id = event.select.id
+
         if sel_id == "sel_provider":
             provider = str(event.value)
             self.app.state["provider"] = provider
-            models = PROVIDER_MODELS.get(provider, [])
-            self.query_one("#sel_model", Select).set_options([(m, m) for m in models])
-            if models:
-                self.query_one("#sel_model", Select).value = models[0]
-                self.app.state["model"] = models[0]
-            self.query_one("#inp_key", Input).value = ""
-            self._load_saved_key()
+            self.call_later(self._update_model_select, provider)
+            self.call_later(self._load_saved_key)
+
         elif sel_id == "sel_model":
             self.app.state["model"] = str(event.value)
+
         elif sel_id == "sel_preferred_ai":
             self.app.state["preferred_ai"] = str(event.value)
 
@@ -871,22 +894,23 @@ class SettingsScreen(Screen):
                 return
             self.app.state["api_key"] = key
             config = load_config()
-            config[PROVIDER_KEYS.get(self.app.state["provider"], "")] = key
-            config["last_provider"] = self.app.state["provider"]
-            config["last_model"] = self.app.state["model"]
-            config["last_mode"] = self.app.state["mode"]
+            provider = self.app.state.get("provider", "")
+            config[PROVIDER_KEYS.get(provider, "_")] = key
+            config["last_provider"] = provider
+            config["last_model"] = self.app.state.get("model", "")
+            config["last_mode"] = self.app.state.get("mode", "fast")
             config["preferred_ai"] = self.app.state.get("preferred_ai", "Claude")
             save_config(config)
             self.app.push_screen(ProgressScreen())
 
 
 class ProgressScreen(Screen):
-    BINDINGS = [Binding("ctrl+c", "cancel_scan", "Cancel")]
+    BINDINGS = [Binding("escape", "cancel_scan", "Cancel")]
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield Container(
-            Label("Scanning and generating prompt...", id="progress_label"),
+            Label("Initializing...", id="progress_label"),
             ProgressBar(total=100, show_eta=False, id="prog_bar"),
             RichLog(id="scan_log", wrap=True, highlight=True),
             id="progress_container",
@@ -899,7 +923,7 @@ class ProgressScreen(Screen):
     def action_cancel_scan(self) -> None:
         if hasattr(self, "_worker"):
             self._worker.cancel()
-        self.app.exit()
+        self.app.pop_screen()
 
     async def _run_scan(self) -> None:
         log = self.query_one("#scan_log", RichLog)
@@ -907,11 +931,20 @@ class ProgressScreen(Screen):
         lbl = self.query_one("#progress_label", Label)
         state = self.app.state
         client: Optional[LLMClient] = None
+        progress_given = 0
+
+        def advance(amount: float) -> None:
+            nonlocal progress_given
+            amt = int(amount)
+            if amt > 0:
+                prog.advance(amt)
+                progress_given += amt
 
         try:
             client = LLMClient(state["provider"], state["api_key"], state["model"], state["mode"])
-            log.write(f"[bold]Provider:[/bold] {state['provider']} / [bold]Model:[/bold] {state['model']}")
-            log.write(f"[bold]Scanning:[/bold] {state['path']}")
+            lbl.update("Scanning project...")
+            log.write(f"[bold]Provider:[/bold] {state['provider']}  [bold]Model:[/bold] {state['model']}")
+            log.write(f"[bold]Path:[/bold] {state['path']}")
 
             scanner = ProjectScanner()
             tree, files = await scanner.scan(state["path"], log)
@@ -922,23 +955,24 @@ class ProgressScreen(Screen):
             analyzable = total_files - binary_count - skipped_count
 
             log.write(
-                f"Found [bold]{total_files}[/bold] files "
-                f"([green]{analyzable}[/green] analyzable, "
-                f"[dim]{binary_count} binary, {skipped_count} skipped[/dim])"
+                f"Found [bold]{total_files}[/bold] files — "
+                f"[green]{analyzable}[/green] analyzable, "
+                f"[dim]{binary_count} binary, {skipped_count} skipped[/dim]"
             )
-            prog.advance(5)
+            advance(5)
 
-            if total_files > 0:
-                file_step = 70.0 / total_files
-            else:
-                file_step = 0
-
-            done_count = 0
+            per_file = (70 / total_files) if total_files > 0 else 0
+            accumulated = 0.0
+            last_int = 0
 
             def on_file_progress(done: int, total: int) -> None:
-                nonlocal done_count
-                done_count = done
-                prog.advance(file_step)
+                nonlocal accumulated, last_int
+                accumulated += per_file
+                current_int = int(accumulated)
+                delta = current_int - last_int
+                if delta > 0:
+                    prog.advance(delta)
+                    last_int = current_int
                 lbl.update(f"Analyzing files... [{done}/{total}]")
 
             log.write(f"[bold]Analyzing [green]{analyzable}[/green] text files...[/bold]")
@@ -946,7 +980,11 @@ class ProgressScreen(Screen):
             file_summaries = await analyzer.analyze(files, on_file_progress)
 
             if not files:
-                prog.advance(70)
+                advance(70)
+            else:
+                remaining = 70 - last_int
+                if remaining > 0:
+                    prog.advance(remaining)
 
             lbl.update("Building final prompt...")
             log.write("[bold]Building AI-ready context document...[/bold]")
@@ -961,13 +999,14 @@ class ProgressScreen(Screen):
                 "binary": binary_count,
                 "skipped": skipped_count,
             }
-            prog.advance(25)
-            log.write("[bold green]Complete! Generating output screen...[/bold green]")
-            await asyncio.sleep(0.3)
+            advance(25)
+            lbl.update("Done!")
+            log.write("[bold green]Complete.[/bold green]")
+            await asyncio.sleep(0.4)
             self.app.push_screen(OutputScreen())
 
         except asyncio.CancelledError:
-            log.write("[yellow]Scan cancelled.[/yellow]")
+            log.write("[yellow]Cancelled.[/yellow]")
         except Exception as e:
             log.write(f"[bold red]Error: {type(e).__name__}: {e}[/bold red]")
             lbl.update(f"Failed: {type(e).__name__}")
@@ -980,44 +1019,42 @@ class ProgressScreen(Screen):
 class OutputScreen(Screen):
     BINDINGS = [
         Binding("ctrl+s", "save_file", "Save"),
-        Binding("ctrl+c", "copy_output", "Copy"),
+        Binding("ctrl+y", "copy_output", "Copy"),
     ]
 
     def compose(self) -> ComposeResult:
         stats = self.app.state.get("file_stats", {})
         stats_text = (
-            f"Files: {stats.get('total', 0)} total | "
-            f"{stats.get('analyzed', 0)} analyzed | "
-            f"{stats.get('binary', 0)} binary | "
+            f"  {stats.get('total', 0)} files total  |  "
+            f"{stats.get('analyzed', 0)} analyzed  |  "
+            f"{stats.get('binary', 0)} binary  |  "
             f"{stats.get('skipped', 0)} skipped"
         ) if stats else ""
 
         out = self.app.state.get("output", "")
         token_est = estimate_tokens(out)
-
         preferred_ai = self.app.state.get("preferred_ai", "Claude")
 
-        ai_buttons = [Label("Open with AI:", id="ai_open_label")]
-        for ai_name in AI_BROWSER_SERVICES:
+        ai_btns: List[Any] = [Label("Open with AI: ", id="ai_open_label")]
+        for ai_name in AI_SERVICE_KEYS:
             variant = "primary" if ai_name == preferred_ai else "default"
-            ai_buttons.append(
-                Button(ai_name, id=f"btn_ai_{ai_name.lower().replace(' ', '_')}", variant=variant, classes="ai_btn")
-            )
+            safe_id = "btn_ai_" + ai_name.lower().replace(" ", "_").replace("(", "").replace(")", "")
+            ai_btns.append(Button(ai_name, id=safe_id, variant=variant, classes="ai_btn"))
 
         yield Header()
         yield Vertical(
             Static(stats_text, id="stats_bar"),
-            Static(f"Estimated tokens: ~{token_est:,}", id="token_label"),
+            Static(f"  ~{token_est:,} tokens estimated", id="token_label"),
             ScrollableContainer(
                 Static(id="output_text", markup=False),
                 id="scroll_area",
             ),
             Vertical(
-                Horizontal(*ai_buttons, id="ai_open_row"),
+                Horizontal(*ai_btns, id="ai_open_row"),
                 Horizontal(
-                    Button("Save to File", variant="success", id="btn_save"),
-                    Button("Copy to Clipboard", variant="default", id="btn_copy"),
-                    Button("Save & Open Preferred AI", variant="warning", id="btn_save_open"),
+                    Button("Save  [Ctrl+S]", variant="success", id="btn_save"),
+                    Button("Copy  [Ctrl+Y]", variant="default", id="btn_copy"),
+                    Button("Save & Open AI", variant="warning", id="btn_save_open"),
                     Button("Exit", variant="error", id="btn_exit"),
                     id="output_buttons",
                 ),
@@ -1052,11 +1089,13 @@ class OutputScreen(Screen):
         elif btn_id == "btn_exit":
             self.app.exit()
         elif btn_id.startswith("btn_ai_"):
-            ai_label = btn_id[len("btn_ai_"):]
+            raw = btn_id[len("btn_ai_"):]
             matched = next(
-                (name for name in AI_BROWSER_SERVICES
-                 if name.lower().replace(" ", "_") == ai_label),
-                None
+                (
+                    name for name in AI_SERVICE_KEYS
+                    if name.lower().replace(" ", "_").replace("(", "").replace(")", "") == raw
+                ),
+                None,
             )
             if matched:
                 self._open_ai_browser(matched, out)
@@ -1092,25 +1131,34 @@ class OutputScreen(Screen):
         if not url:
             self.notify(f"Unknown AI service: {ai_name}", severity="error")
             return
-
         copied = copy_to_clipboard(content)
-
         try:
             webbrowser.open(url)
-            msg = f"Opened {ai_name} in browser."
             if copied:
-                msg += " Prompt copied to clipboard — paste it!"
+                self.notify(
+                    f"Opened {ai_name}. Prompt copied to clipboard — paste it!",
+                    severity="information",
+                    timeout=8,
+                )
             elif saved_path:
-                msg += f" Open {saved_path} to copy the prompt."
+                self.notify(
+                    f"Opened {ai_name}. Copy the prompt from {saved_path.name}",
+                    severity="information",
+                    timeout=8,
+                )
             else:
-                msg += " Use Save to File to get the prompt."
-            self.notify(msg, severity="information", timeout=8)
+                self.notify(
+                    f"Opened {ai_name}. Use Save to get the prompt.",
+                    severity="information",
+                    timeout=8,
+                )
         except Exception as e:
             self.notify(f"Could not open browser: {e}", severity="error")
 
 
 class pxForgeApp(App):
-    TITLE = "pxForge — AI-Ready Project Context Generator"
+    TITLE = "pxForge"
+    SUB_TITLE = "AI-Ready Project Context Generator"
     CSS = APP_CSS
     BINDINGS = [Binding("ctrl+q", "quit", "Quit")]
 
@@ -1119,15 +1167,19 @@ class pxForgeApp(App):
         self.start_path = start_path
         resolved = start_path or str(Path.cwd())
         config = load_config()
+
         saved_provider = config.get("last_provider", "Anthropic (Claude)")
         if saved_provider not in PROVIDER_MODELS:
-            saved_provider = "OpenAI"
-        saved_model = config.get("last_model", PROVIDER_MODELS[saved_provider][0])
+            saved_provider = PROVIDER_NAMES[0]
+
+        saved_model = config.get("last_model", "")
         if saved_model not in PROVIDER_MODELS.get(saved_provider, []):
             saved_model = PROVIDER_MODELS[saved_provider][0]
+
         preferred_ai = config.get("preferred_ai", "Claude")
         if preferred_ai not in AI_BROWSER_SERVICES:
-            preferred_ai = "Claude"
+            preferred_ai = AI_SERVICE_KEYS[0]
+
         self.state: Dict[str, Any] = {
             "path": resolved,
             "output_dir": resolved,

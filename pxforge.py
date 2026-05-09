@@ -4,21 +4,34 @@ import json
 import stat
 import asyncio
 import random
+import webbrowser
+import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import httpx
 from textual.app import App, ComposeResult, Screen
 from textual.widgets import (
     Header, Footer, DirectoryTree, Input, Select, Switch, Label,
-    ProgressBar, RichLog, Button, Static
+    ProgressBar, RichLog, Button, Static, Collapsible, RadioSet, RadioButton
 )
 from textual.containers import Container, Horizontal, ScrollableContainer, Vertical
+from textual.reactive import reactive
+from textual.binding import Binding
 
 CONFIG_DIR = Path.home() / ".pxforge"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 BIN_DIR = Path.home() / ".local" / "bin"
 SCRIPT_PATH = Path(__file__).resolve()
 
+AI_BROWSER_SERVICES = {
+    "Claude": "https://claude.ai",
+    "ChatGPT": "https://chatgpt.com",
+    "Gemini": "https://gemini.google.com",
+    "Grok": "https://grok.com",
+    "Perplexity": "https://perplexity.ai",
+    "Mistral": "https://chat.mistral.ai",
+    "DeepSeek": "https://chat.deepseek.com",
+}
 
 def detect_shell() -> Tuple[str, Path]:
     shell = os.environ.get("SHELL", "")
@@ -47,8 +60,8 @@ def install_to_path() -> None:
         line = f"fish_add_path {bin_str}" if shell_name == "fish" else f'export PATH="{bin_str}:$PATH"'
         with open(rc_file, "a") as f:
             f.write(f"\n# pxforge\n{line}\n")
-    print(f"✓ Installed: {wrapper}")
-    print(f"✓ PATH entry added to: {rc_file}")
+    print(f"Installed: {wrapper}")
+    print(f"PATH entry added to: {rc_file}")
     print(f"\nRestart your shell or run:  source {rc_file}")
     print("Then use:  pxforge            # scans current directory")
     print("           pxforge /some/path # scans given path")
@@ -56,18 +69,23 @@ def install_to_path() -> None:
 
 IGNORED_DIRS = {
     '.git', 'node_modules', 'dist', 'build', '__pycache__',
-    '.venv', 'env', 'venv', '.next', '.nuxt', 'coverage', '.cache'
+    '.venv', 'env', 'venv', '.next', '.nuxt', 'coverage', '.cache',
+    '.idea', '.vscode', '.DS_Store', 'target', 'out', '.gradle',
+    '.mypy_cache', '.pytest_cache', '.ruff_cache', 'vendor'
 }
 IGNORED_EXT = {
     '.pyc', '.pyo', '.exe', '.dll', '.so', '.dylib', '.whl',
     '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar',
     '.bin', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
     '.pdf', '.mp3', '.mp4', '.avi', '.lock', '.bmp', '.webp',
-    '.tiff', '.wav', '.ogg', '.flac', '.ttf', '.woff', '.woff2', '.eot'
+    '.tiff', '.wav', '.ogg', '.flac', '.ttf', '.woff', '.woff2', '.eot',
+    '.class', '.o', '.a', '.lib', '.pdb', '.map', '.min.js', '.min.css',
+    '.DS_Store', '.suo', '.user', '.orig', '.rej',
 }
-BINARY_MARKERS = {b'\x7fELF', b'\x89PNG', b'\xff\xd8\xff\xe0', b'%PDF-1.', b'PK\x03\x04'}
-CHUNK_SIZE = 4000
+BINARY_MARKERS = {b'\x7fELF', b'\x89PNG', b'\xff\xd8\xff\xe0', b'%PDF-1.', b'PK\x03\x04', b'\x00\x00\x00\x00'}
+CHUNK_SIZE = 6000
 MIN_CONTENT_LEN = 20
+MAX_FILE_SIZE_BYTES = 500_000
 
 PROVIDER_KEYS = {
     "OpenAI": "openai_key",
@@ -84,10 +102,10 @@ PROVIDER_ENV = {
 }
 
 PROVIDER_MODELS = {
-    "OpenAI": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+    "OpenAI": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3-mini"],
     "Anthropic (Claude)": [
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
+        "claude-sonnet-4-20250514",
+        "claude-opus-4-20250514",
         "claude-haiku-4-5-20251001",
         "claude-3-5-sonnet-20241022",
     ],
@@ -95,12 +113,14 @@ PROVIDER_MODELS = {
         "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
         "gemma2-9b-it",
+        "mixtral-8x7b-32768",
     ],
     "OpenRouter": [
+        "anthropic/claude-sonnet-4-5",
         "meta-llama/llama-3.3-70b-instruct",
         "openai/gpt-4o",
-        "anthropic/claude-3.5-sonnet",
         "google/gemini-2.0-flash-001",
+        "deepseek/deepseek-r1",
     ],
 }
 
@@ -238,14 +258,60 @@ Footer {
 }
 
 #output_buttons {
-    height: 3;
+    height: auto;
     align: right middle;
     padding: 0 2;
     margin: 1 0;
 }
 
+#ai_open_row {
+    height: auto;
+    align: left middle;
+    padding: 0 2;
+    margin-bottom: 1;
+    width: 100%;
+}
+
+#ai_open_label {
+    color: $text-muted;
+    text-style: bold;
+    padding: 0 1;
+    margin-right: 1;
+}
+
+.ai_btn {
+    margin-left: 1;
+    min-width: 12;
+}
+
+#stats_bar {
+    color: $text-muted;
+    padding: 0 2;
+    margin-bottom: 1;
+    height: 1;
+}
+
 Button {
     margin-left: 1;
+}
+
+#output_section {
+    height: 100%;
+    width: 100%;
+}
+
+#bottom_panel {
+    height: auto;
+    width: 100%;
+    border-top: solid $primary;
+    padding-top: 1;
+}
+
+#token_label {
+    color: $warning;
+    padding: 0 2;
+    margin-bottom: 1;
+    text-style: italic;
 }
 """
 
@@ -268,6 +334,29 @@ def save_config(config: Dict[str, Any]) -> None:
             json.dump(config, f, indent=2)
     except Exception:
         pass
+
+
+def estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+def copy_to_clipboard(content: str) -> bool:
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["pbcopy"], input=content, text=True, check=True, timeout=5)
+            return True
+        if sys.platform == "win32":
+            subprocess.run(["clip"], input=content, text=True, shell=True, check=True, timeout=5)
+            return True
+        for cmd in [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]:
+            try:
+                subprocess.run(cmd, input=content, text=True, check=True, timeout=5)
+                return True
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                continue
+        return False
+    except Exception:
+        return False
 
 
 SYSTEM_ANALYST = """\
@@ -333,14 +422,14 @@ class LLMClient:
         "Groq": "https://api.groq.com/openai/v1/chat/completions",
         "OpenRouter": "https://openrouter.ai/api/v1/chat/completions",
     }
-    MAX_RETRIES = 4
+    MAX_RETRIES = 5
 
     def __init__(self, provider: str, api_key: str, model: str, mode: str):
         self.provider = provider
         self.api_key = api_key
         self.model = model
-        self.max_tokens = 4000 if mode == "high_quality" else 2000
-        self._http = httpx.AsyncClient(timeout=120.0)
+        self.max_tokens = 4096 if mode == "high_quality" else 2048
+        self._http = httpx.AsyncClient(timeout=180.0)
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -351,7 +440,7 @@ class LLMClient:
             return {**base, "x-api-key": self.api_key, "anthropic-version": "2023-06-01"}
         if self.provider == "OpenRouter":
             return {**base, "Authorization": f"Bearer {self.api_key}",
-                    "HTTP-Referer": "pxforge", "X-Title": "pxForge"}
+                    "HTTP-Referer": "https://github.com/pxforge", "X-Title": "pxForge"}
         return {**base, "Authorization": f"Bearer {self.api_key}"}
 
     def _payload(self, prompt: str, system: str) -> Dict[str, Any]:
@@ -374,9 +463,13 @@ class LLMClient:
     def _extract(self, data: Dict[str, Any]) -> str:
         if self.provider == "Anthropic (Claude)":
             blocks = data.get("content", [])
-            return blocks[0].get("text", "") if blocks else ""
+            texts = [b.get("text", "") for b in blocks if b.get("type") == "text"]
+            return "\n".join(t for t in texts if t)
         choices = data.get("choices", [])
-        return choices[0].get("message", {}).get("content", "") if choices else ""
+        if not choices:
+            return ""
+        msg = choices[0].get("message", {})
+        return msg.get("content", "") or ""
 
     async def generate(self, prompt: str, system: str = SYSTEM_ANALYST) -> str:
         url = self.URLS.get(self.provider)
@@ -389,12 +482,19 @@ class LLMClient:
                     url, headers=self._headers(), json=self._payload(prompt, system)
                 )
                 if resp.status_code == 429:
-                    wait = (2 ** attempt) + random.uniform(0, 1)
+                    wait = min((2 ** attempt) + random.uniform(0, 1), 30.0)
                     await asyncio.sleep(wait)
-                    last_exc = Exception(f"Rate limited (429), retrying after {wait:.1f}s")
+                    last_exc = Exception(f"Rate limited (429), retried after {wait:.1f}s")
                     continue
+                if resp.status_code in (503, 502, 500):
+                    if attempt < self.MAX_RETRIES - 1:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
                 resp.raise_for_status()
-                return self._extract(resp.json())
+                result = self._extract(resp.json())
+                if not result:
+                    raise ValueError("Empty response from API")
+                return result
             except httpx.TimeoutException as exc:
                 last_exc = exc
                 if attempt < self.MAX_RETRIES - 1:
@@ -405,19 +505,26 @@ class LLMClient:
                     await asyncio.sleep(2 ** attempt)
                     continue
                 raise
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(1)
         raise last_exc or RuntimeError("Max retries exceeded")
 
 
 def _listdir_filtered(dirpath: str) -> List[Tuple[str, str, bool]]:
     try:
-        entries = sorted(os.scandir(dirpath), key=lambda e: e.name)
+        entries = sorted(os.scandir(dirpath), key=lambda e: (not e.is_dir(), e.name.lower()))
     except PermissionError:
         return []
     result = []
     for entry in entries:
+        if entry.name.startswith('.') and entry.name in IGNORED_DIRS:
+            continue
         if entry.name in IGNORED_DIRS:
             continue
-        if entry.is_file(follow_symlinks=False) and Path(entry.name).suffix.lower() in IGNORED_EXT:
+        ext = Path(entry.name).suffix.lower()
+        if entry.is_file(follow_symlinks=False) and ext in IGNORED_EXT:
             continue
         result.append((entry.name, entry.path, entry.is_dir(follow_symlinks=False)))
     return result
@@ -426,20 +533,29 @@ def _listdir_filtered(dirpath: str) -> List[Tuple[str, str, bool]]:
 def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
     ext = Path(filepath).suffix.lower()
     try:
+        size = os.path.getsize(filepath)
+        if size > MAX_FILE_SIZE_BYTES:
+            return {"path": filepath, "type": ext, "is_binary": False,
+                    "content": None, "skipped": True, "reason": f"file too large ({size // 1024}KB)"}
         with open(filepath, "rb") as f:
-            header = f.read(8)
+            header = f.read(16)
         if any(header.startswith(m) for m in BINARY_MARKERS):
-            return {"path": filepath, "type": ext, "is_binary": True, "content": None}
+            return {"path": filepath, "type": ext, "is_binary": True, "content": None, "skipped": False}
+        if b'\x00' in header:
+            return {"path": filepath, "type": ext, "is_binary": True, "content": None, "skipped": False}
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
-        return {"path": filepath, "type": ext, "is_binary": False, "content": content}
+        return {"path": filepath, "type": ext, "is_binary": False, "content": content, "skipped": False}
+    except PermissionError:
+        return {"path": filepath, "type": ext, "is_binary": False,
+                "content": None, "skipped": True, "reason": "permission denied"}
     except Exception:
         return None
 
 
 class ProjectScanner:
     async def scan(self, path: str, log: RichLog) -> Tuple[str, List[Dict[str, Any]]]:
-        log.write("Walking directory tree...")
+        log.write("[bold cyan]Walking directory tree...[/bold cyan]")
         tree_lines, files = await self._walk(path, "")
         return "\n".join(tree_lines), files
 
@@ -500,8 +616,14 @@ class FileAnalyzer:
             name = os.path.basename(f["path"])
             content = f.get("content") or ""
 
+            if f.get("skipped"):
+                reason = f.get("reason", "skipped")
+                results[f["path"]] = f"[SKIPPED:{reason}] {f['path']}"
+                on_progress(idx + 1, total)
+                return
+
             if f["is_binary"] or len(content.strip()) < MIN_CONTENT_LEN:
-                label = "BINARY" if f["is_binary"] else "SKIPPED"
+                label = "BINARY" if f["is_binary"] else "SKIPPED:empty"
                 results[f["path"]] = f"[{label}] {f['path']}"
                 on_progress(idx + 1, total)
                 return
@@ -512,28 +634,32 @@ class FileAnalyzer:
                 prompt = (
                     "Analyze this code/text. Concisely extract:\n"
                     "- Purpose\n- Key functions/classes\n- Dependencies\n- Important logic\n\n"
-                    f"Content:\n{chunk}"
+                    f"File: {name}\nContent:\n{chunk}"
                 )
                 async with self._sem:
-                    self.log.write(f"  [{idx+1}/{total}] {name} — chunk {ci+1}/{len(chunks)}")
+                    self.log.write(
+                        f"  [[bold]{idx+1}/{total}[/bold]] {name}"
+                        + (f" — chunk {ci+1}/{len(chunks)}" if len(chunks) > 1 else "")
+                    )
                     try:
                         return await self.client.generate(prompt, system=SYSTEM_ANALYST)
                     except Exception as e:
-                        self.log.write(f"  [!] {name} chunk {ci+1}: {e}")
+                        self.log.write(f"  [red][!] {name} chunk {ci+1}: {e}[/red]")
                         return ""
 
             summaries = [s for s in await asyncio.gather(
                 *[analyze_chunk(ci, chunk) for ci, chunk in enumerate(chunks)]
-            ) if s]
+            ) if s.strip()]
 
             if not summaries:
                 results[f["path"]] = f"[FAILED] {f['path']}"
             elif len(summaries) == 1:
                 results[f["path"]] = summaries[0]
             else:
-                self.log.write(f"  Merging {len(summaries)} chunks for {name}")
+                self.log.write(f"  [yellow]Merging {len(summaries)} chunks for {name}[/yellow]")
                 merge_prompt = (
-                    "Merge these analysis chunks into one coherent summary. "
+                    "Merge these partial analyses of the same file into one coherent summary. "
+                    "File: " + name + "\n"
                     "Preserve: Purpose, Key functions/classes, Dependencies, Important logic.\n\n"
                     + "\n---\n".join(summaries)
                 )
@@ -551,7 +677,7 @@ class FileAnalyzer:
 
 
 class PromptBuilder:
-    MAX_CTX_CHARS = 80_000
+    MAX_CTX_CHARS = 100_000
 
     async def build(
         self,
@@ -561,48 +687,61 @@ class PromptBuilder:
         log: RichLog,
         base_path: str = "",
     ) -> str:
-        log.write("Generating project summary...")
+        log.write("[bold cyan]Generating project summary...[/bold cyan]")
 
         def rel(p: str) -> str:
-            return os.path.relpath(p, base_path) if base_path else os.path.basename(p)
+            try:
+                return os.path.relpath(p, base_path) if base_path else os.path.basename(p)
+            except ValueError:
+                return os.path.basename(p)
 
-        ctx_lines = [f"{rel(p)}: {s}" for p, s in file_summaries.items()]
+        valid_summaries = {p: s for p, s in file_summaries.items() if not s.startswith("[")}
+        skipped_summaries = {p: s for p, s in file_summaries.items() if s.startswith("[")}
+
+        ctx_lines = [f"{rel(p)}: {s}" for p, s in valid_summaries.items()]
         ctx = "\n".join(ctx_lines)
         if len(ctx) > self.MAX_CTX_CHARS:
-            ctx = ctx[:self.MAX_CTX_CHARS] + "\n...[truncated]"
+            ctx = ctx[:self.MAX_CTX_CHARS] + "\n...[truncated for context window]"
+
+        tree_for_summary = tree
+        if len(tree) > 10_000:
+            tree_for_summary = tree[:10_000] + "\n...[tree truncated]"
 
         project_summary = await client.generate(
             "Analyze the project structure and file summaries below. "
-            "Write a concise PROJECT SUMMARY covering: technology stack, architecture, and core functionality.\n\n"
-            f"Tree:\n{tree}\n\nFiles:\n{ctx}",
+            "Write a concise PROJECT SUMMARY covering: technology stack, architecture, core functionality, and key design patterns.\n\n"
+            f"Directory Tree:\n{tree_for_summary}\n\nFile Analyses:\n{ctx}",
             system=SYSTEM_ARCHITECT,
         )
 
         key_sections: List[str] = []
-        other_lines: List[str] = []
-        for p, s in file_summaries.items():
-            r = rel(p)
-            if s.startswith("["):
-                other_lines.append(f"{r}: {s}")
-            else:
-                key_sections.append(f"### {r}\n{s}")
+        for p, s in valid_summaries.items():
+            key_sections.append(f"### {rel(p)}\n{s}")
+
+        other_lines = [f"{rel(p)}: {s}" for p, s in skipped_summaries.items()]
 
         body = (
             f"# PROJECT SUMMARY\n{project_summary}\n\n"
             f"# DIRECTORY STRUCTURE\n```\n{tree}\n```\n\n"
-            "# KEY FILE SUMMARIES\n" + "\n\n".join(key_sections)
+            "# FILE ANALYSES\n" + "\n\n".join(key_sections)
         )
         if other_lines:
-            body += "\n\n# OTHER FILES\n" + "\n".join(other_lines)
+            body += "\n\n# SKIPPED / BINARY FILES\n" + "\n".join(other_lines)
 
-        log.write("Building final AI-ready prompt...")
+        log.write("[bold cyan]Building AI-ready system prompt...[/bold cyan]")
         ctx_for_prompt = body if len(body) <= self.MAX_CTX_CHARS else body[:self.MAX_CTX_CHARS] + "\n...[truncated]"
         final_prompt = await client.generate(
-            "Generate a comprehensive, AI-ready system prompt for a developer assistant "
-            "working on this project. Base it on the context below.\n\n" + ctx_for_prompt,
+            "Generate a comprehensive, immediately-usable AI system prompt for a developer assistant "
+            "working on this exact project. Be specific. Base it on the full context below.\n\n" + ctx_for_prompt,
             system=SYSTEM_PROMPT_ENGINEER,
         )
-        return body + f"\n\n# AI SYSTEM PROMPT\n{final_prompt}"
+
+        stats = (
+            f"<!-- pxForge Stats: {len(valid_summaries)} files analyzed, "
+            f"{len(skipped_summaries)} skipped, "
+            f"~{estimate_tokens(body):,} tokens -->"
+        )
+        return body + f"\n\n# AI SYSTEM PROMPT\n{final_prompt}\n\n{stats}"
 
 
 class DirSelectScreen(Screen):
@@ -640,7 +779,10 @@ class SettingsScreen(Screen):
         current_provider = self.app.state["provider"]
         current_model = self.app.state["model"]
         providers = [(p, p) for p in PROVIDER_MODELS]
-        provider_models = PROVIDER_MODELS[current_provider]
+        provider_models = PROVIDER_MODELS.get(current_provider, [])
+        if not provider_models:
+            current_provider = "OpenAI"
+            provider_models = PROVIDER_MODELS["OpenAI"]
         models = [(m, m) for m in provider_models]
         default_model = current_model if current_model in provider_models else provider_models[0]
         scan_path = self.app.state["path"]
@@ -665,6 +807,12 @@ class SettingsScreen(Screen):
                     Label("High Quality"),
                     id="mode_row",
                 ),
+                Label("Preferred AI for viewing output:"),
+                Select(
+                    [(name, name) for name in AI_BROWSER_SERVICES],
+                    value=self.app.state.get("preferred_ai", "Claude"),
+                    id="sel_preferred_ai",
+                ),
                 Horizontal(
                     Button("Back", variant="default", id="btn_back"),
                     Button("Start Scan", variant="primary", id="btn_start"),
@@ -681,7 +829,8 @@ class SettingsScreen(Screen):
     def _load_saved_key(self) -> None:
         provider = self.app.state["provider"]
         config = load_config()
-        key = config.get(PROVIDER_KEYS.get(provider, ""), "")
+        key_field = PROVIDER_KEYS.get(provider, "")
+        key = config.get(key_field, "")
         if not key:
             key = os.getenv(PROVIDER_ENV.get(provider, ""), "")
         if key:
@@ -690,7 +839,8 @@ class SettingsScreen(Screen):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.value is Select.BLANK:
             return
-        if event.select.id == "sel_provider":
+        sel_id = event.select.id
+        if sel_id == "sel_provider":
             provider = str(event.value)
             self.app.state["provider"] = provider
             models = PROVIDER_MODELS.get(provider, [])
@@ -700,8 +850,10 @@ class SettingsScreen(Screen):
                 self.app.state["model"] = models[0]
             self.query_one("#inp_key", Input).value = ""
             self._load_saved_key()
-        elif event.select.id == "sel_model":
+        elif sel_id == "sel_model":
             self.app.state["model"] = str(event.value)
+        elif sel_id == "sel_preferred_ai":
+            self.app.state["preferred_ai"] = str(event.value)
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         self.app.state["mode"] = "high_quality" if event.value else "fast"
@@ -723,11 +875,14 @@ class SettingsScreen(Screen):
             config["last_provider"] = self.app.state["provider"]
             config["last_model"] = self.app.state["model"]
             config["last_mode"] = self.app.state["mode"]
+            config["preferred_ai"] = self.app.state.get("preferred_ai", "Claude")
             save_config(config)
             self.app.push_screen(ProgressScreen())
 
 
 class ProgressScreen(Screen):
+    BINDINGS = [Binding("ctrl+c", "cancel_scan", "Cancel")]
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield Container(
@@ -739,7 +894,12 @@ class ProgressScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.run_worker(self._run_scan(), exclusive=True)
+        self._worker = self.run_worker(self._run_scan(), exclusive=True)
+
+    def action_cancel_scan(self) -> None:
+        if hasattr(self, "_worker"):
+            self._worker.cancel()
+        self.app.exit()
 
     async def _run_scan(self) -> None:
         log = self.query_one("#scan_log", RichLog)
@@ -750,61 +910,120 @@ class ProgressScreen(Screen):
 
         try:
             client = LLMClient(state["provider"], state["api_key"], state["model"], state["mode"])
-
+            log.write(f"[bold]Provider:[/bold] {state['provider']} / [bold]Model:[/bold] {state['model']}")
             log.write(f"[bold]Scanning:[/bold] {state['path']}")
+
             scanner = ProjectScanner()
             tree, files = await scanner.scan(state["path"], log)
-            log.write(f"Found [bold]{len(files)}[/bold] files.")
+
+            total_files = len(files)
+            binary_count = sum(1 for f in files if f.get("is_binary"))
+            skipped_count = sum(1 for f in files if f.get("skipped"))
+            analyzable = total_files - binary_count - skipped_count
+
+            log.write(
+                f"Found [bold]{total_files}[/bold] files "
+                f"([green]{analyzable}[/green] analyzable, "
+                f"[dim]{binary_count} binary, {skipped_count} skipped[/dim])"
+            )
             prog.advance(5)
 
-            file_step = 75.0 / max(len(files), 1)
+            if total_files > 0:
+                file_step = 70.0 / total_files
+            else:
+                file_step = 0
+
+            done_count = 0
 
             def on_file_progress(done: int, total: int) -> None:
+                nonlocal done_count
+                done_count = done
                 prog.advance(file_step)
+                lbl.update(f"Analyzing files... [{done}/{total}]")
 
-            analyzable_count = sum(
-                1 for f in files
-                if not f["is_binary"] and len((f.get("content") or "").strip()) >= MIN_CONTENT_LEN
-            )
-            log.write(f"Analyzing [bold]{analyzable_count}[/bold] text files...")
-
+            log.write(f"[bold]Analyzing [green]{analyzable}[/green] text files...[/bold]")
             analyzer = FileAnalyzer(client, log)
             file_summaries = await analyzer.analyze(files, on_file_progress)
 
             if not files:
-                prog.advance(75)
+                prog.advance(70)
 
-            log.write("Building final prompt...")
+            lbl.update("Building final prompt...")
+            log.write("[bold]Building AI-ready context document...[/bold]")
             builder = PromptBuilder()
             final_output = await builder.build(tree, file_summaries, client, log, state["path"])
 
             state["output"] = final_output
             state["output_dir"] = state["path"]
-            prog.advance(20)
-            log.write("[bold green]✓ Complete.[/bold green]")
-            await asyncio.sleep(0.5)
+            state["file_stats"] = {
+                "total": total_files,
+                "analyzed": analyzable,
+                "binary": binary_count,
+                "skipped": skipped_count,
+            }
+            prog.advance(25)
+            log.write("[bold green]Complete! Generating output screen...[/bold green]")
+            await asyncio.sleep(0.3)
             self.app.push_screen(OutputScreen())
 
+        except asyncio.CancelledError:
+            log.write("[yellow]Scan cancelled.[/yellow]")
         except Exception as e:
-            log.write(f"[bold red]✗ Error: {e}[/bold red]")
-            lbl.update(f"Failed: {type(e).__name__} — {e}")
+            log.write(f"[bold red]Error: {type(e).__name__}: {e}[/bold red]")
+            lbl.update(f"Failed: {type(e).__name__}")
+            self.notify(str(e), severity="error", timeout=10)
         finally:
             if client:
                 await client.close()
 
 
 class OutputScreen(Screen):
+    BINDINGS = [
+        Binding("ctrl+s", "save_file", "Save"),
+        Binding("ctrl+c", "copy_output", "Copy"),
+    ]
+
     def compose(self) -> ComposeResult:
+        stats = self.app.state.get("file_stats", {})
+        stats_text = (
+            f"Files: {stats.get('total', 0)} total | "
+            f"{stats.get('analyzed', 0)} analyzed | "
+            f"{stats.get('binary', 0)} binary | "
+            f"{stats.get('skipped', 0)} skipped"
+        ) if stats else ""
+
+        out = self.app.state.get("output", "")
+        token_est = estimate_tokens(out)
+
+        preferred_ai = self.app.state.get("preferred_ai", "Claude")
+
+        ai_buttons = [Label("Open with AI:", id="ai_open_label")]
+        for ai_name in AI_BROWSER_SERVICES:
+            variant = "primary" if ai_name == preferred_ai else "default"
+            ai_buttons.append(
+                Button(ai_name, id=f"btn_ai_{ai_name.lower().replace(' ', '_')}", variant=variant, classes="ai_btn")
+            )
+
         yield Header()
-        yield ScrollableContainer(
-            Static(id="output_text", markup=False),
-            id="scroll_area",
-        )
-        yield Horizontal(
-            Button("Save to File", variant="success", id="btn_save"),
-            Button("Copy to Clipboard", id="btn_copy"),
-            Button("Exit", variant="error", id="btn_exit"),
-            id="output_buttons",
+        yield Vertical(
+            Static(stats_text, id="stats_bar"),
+            Static(f"Estimated tokens: ~{token_est:,}", id="token_label"),
+            ScrollableContainer(
+                Static(id="output_text", markup=False),
+                id="scroll_area",
+            ),
+            Vertical(
+                Horizontal(*ai_buttons, id="ai_open_row"),
+                Horizontal(
+                    Button("Save to File", variant="success", id="btn_save"),
+                    Button("Copy to Clipboard", variant="default", id="btn_copy"),
+                    Button("Save & Open Preferred AI", variant="warning", id="btn_save_open"),
+                    Button("Exit", variant="error", id="btn_exit"),
+                    id="output_buttons",
+                ),
+                id="bottom_panel",
+            ),
+            id="output_section",
         )
         yield Footer()
 
@@ -812,72 +1031,103 @@ class OutputScreen(Screen):
         out = self.app.state.get("output", "No output generated.")
         self.query_one("#output_text", Static).update(out)
 
+    def action_save_file(self) -> None:
+        self._save(self.app.state.get("output", ""))
+
+    def action_copy_output(self) -> None:
+        self._do_copy(self.app.state.get("output", ""))
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         out = self.app.state.get("output", "")
-        if event.button.id == "btn_save":
-            self._save(out)
-        elif event.button.id == "btn_copy":
-            self._copy(out)
-        elif event.button.id == "btn_exit":
-            self.app.exit()
+        btn_id = event.button.id or ""
 
-    def _save(self, content: str) -> None:
+        if btn_id == "btn_save":
+            self._save(out)
+        elif btn_id == "btn_copy":
+            self._do_copy(out)
+        elif btn_id == "btn_save_open":
+            saved_path = self._save(out, notify=False)
+            preferred_ai = self.app.state.get("preferred_ai", "Claude")
+            self._open_ai_browser(preferred_ai, out, saved_path)
+        elif btn_id == "btn_exit":
+            self.app.exit()
+        elif btn_id.startswith("btn_ai_"):
+            ai_label = btn_id[len("btn_ai_"):]
+            matched = next(
+                (name for name in AI_BROWSER_SERVICES
+                 if name.lower().replace(" ", "_") == ai_label),
+                None
+            )
+            if matched:
+                self._open_ai_browser(matched, out)
+
+    def _save(self, content: str, notify: bool = True) -> Optional[Path]:
         try:
             out_dir = Path(self.app.state.get("output_dir", "."))
             out_path = out_dir / "pxforge_output.md"
             out_path.write_text(content, encoding="utf-8")
-            self.notify(f"Saved to {out_path}", severity="information")
+            if notify:
+                self.notify(f"Saved to {out_path}", severity="information")
+            return out_path
         except Exception as e:
             self.notify(f"Save failed: {e}", severity="error")
+            return None
 
-    def _copy(self, content: str) -> None:
-        import subprocess
-        try:
-            if sys.platform == "darwin":
-                subprocess.run(["pbcopy"], input=content, text=True, check=True)
-                self.notify("Copied to clipboard.", severity="information")
-                return
-            if sys.platform == "win32":
-                subprocess.run(["clip"], input=content, text=True, shell=True, check=True)
-                self.notify("Copied to clipboard.", severity="information")
-                return
-            for cmd in [
-                ["wl-copy"],
-                ["xclip", "-selection", "clipboard"],
-                ["xsel", "--clipboard", "--input"],
-            ]:
-                try:
-                    subprocess.run(cmd, input=content, text=True, check=True)
-                    self.notify("Copied to clipboard.", severity="information")
-                    return
-                except FileNotFoundError:
-                    continue
+    def _do_copy(self, content: str) -> None:
+        if copy_to_clipboard(content):
+            self.notify("Copied to clipboard.", severity="information")
+        else:
             self.notify(
                 "No clipboard tool found. Install wl-copy, xclip, or xsel.",
                 severity="warning",
             )
-        except subprocess.CalledProcessError as e:
-            self.notify(f"Clipboard copy failed: {e}", severity="error")
+
+    def _open_ai_browser(
+        self,
+        ai_name: str,
+        content: str,
+        saved_path: Optional[Path] = None,
+    ) -> None:
+        url = AI_BROWSER_SERVICES.get(ai_name, "")
+        if not url:
+            self.notify(f"Unknown AI service: {ai_name}", severity="error")
+            return
+
+        copied = copy_to_clipboard(content)
+
+        try:
+            webbrowser.open(url)
+            msg = f"Opened {ai_name} in browser."
+            if copied:
+                msg += " Prompt copied to clipboard — paste it!"
+            elif saved_path:
+                msg += f" Open {saved_path} to copy the prompt."
+            else:
+                msg += " Use Save to File to get the prompt."
+            self.notify(msg, severity="information", timeout=8)
         except Exception as e:
-            self.notify(f"Clipboard error: {e}", severity="error")
+            self.notify(f"Could not open browser: {e}", severity="error")
 
 
 class pxForgeApp(App):
-    TITLE = "pxForge"
+    TITLE = "pxForge — AI-Ready Project Context Generator"
     CSS = APP_CSS
-    BINDINGS = [("ctrl+q", "quit", "Quit")]
+    BINDINGS = [Binding("ctrl+q", "quit", "Quit")]
 
     def __init__(self, start_path: Optional[str] = None) -> None:
         super().__init__()
         self.start_path = start_path
         resolved = start_path or str(Path.cwd())
         config = load_config()
-        saved_provider = config.get("last_provider", "OpenAI")
+        saved_provider = config.get("last_provider", "Anthropic (Claude)")
         if saved_provider not in PROVIDER_MODELS:
             saved_provider = "OpenAI"
         saved_model = config.get("last_model", PROVIDER_MODELS[saved_provider][0])
         if saved_model not in PROVIDER_MODELS.get(saved_provider, []):
             saved_model = PROVIDER_MODELS[saved_provider][0]
+        preferred_ai = config.get("preferred_ai", "Claude")
+        if preferred_ai not in AI_BROWSER_SERVICES:
+            preferred_ai = "Claude"
         self.state: Dict[str, Any] = {
             "path": resolved,
             "output_dir": resolved,
@@ -886,6 +1136,8 @@ class pxForgeApp(App):
             "model": saved_model,
             "mode": config.get("last_mode", "fast"),
             "output": "",
+            "preferred_ai": preferred_ai,
+            "file_stats": {},
         }
 
     def on_mount(self) -> None:

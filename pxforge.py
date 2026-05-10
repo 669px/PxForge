@@ -22,6 +22,9 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 BIN_DIR = Path.home() / ".local" / "bin"
 SCRIPT_PATH = Path(__file__).resolve()
 
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_PROVIDER = "Ollama (Local)"
+
 AI_BROWSER_SERVICES = {
     "Claude": "https://claude.ai",
     "ChatGPT": "https://chatgpt.com",
@@ -97,6 +100,7 @@ PROVIDER_KEYS = {
     "Anthropic (Claude)": "anthropic_key",
     "Groq": "groq_key",
     "OpenRouter": "openrouter_key",
+    OLLAMA_PROVIDER: "",
 }
 
 PROVIDER_ENV = {
@@ -104,6 +108,7 @@ PROVIDER_ENV = {
     "Anthropic (Claude)": "ANTHROPIC_API_KEY",
     "Groq": "GROQ_API_KEY",
     "OpenRouter": "OPENROUTER_API_KEY",
+    OLLAMA_PROVIDER: "",
 }
 
 PROVIDER_MODELS: Dict[str, List[str]] = {
@@ -127,6 +132,7 @@ PROVIDER_MODELS: Dict[str, List[str]] = {
         "google/gemini-2.0-flash-001",
         "deepseek/deepseek-r1",
     ],
+    OLLAMA_PROVIDER: [],
 }
 
 PROVIDER_NAMES: List[str] = list(PROVIDER_MODELS.keys())
@@ -136,7 +142,38 @@ PROVIDER_CONCURRENCY = {
     "Anthropic (Claude)": 5,
     "Groq": 3,
     "OpenRouter": 5,
+    OLLAMA_PROVIDER: 2,
 }
+
+
+async def fetch_ollama_models() -> Tuple[List[str], str]:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            models = [m["name"] for m in data.get("models", [])]
+            if not models:
+                return [], "connected — no models downloaded"
+            return models, f"connected — {len(models)} model(s) found"
+    except httpx.ConnectError:
+        return [], "offline — is Ollama running? (ollama serve)"
+    except httpx.TimeoutException:
+        return [], "timeout — Ollama not responding"
+    except Exception as e:
+        return [], f"error — {e}"
+
+
+def fetch_ollama_models_sync() -> Tuple[List[str], str]:
+    try:
+        return asyncio.run(fetch_ollama_models())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(fetch_ollama_models())
+        finally:
+            loop.close()
+
 
 APP_CSS = """
 Screen {
@@ -220,6 +257,22 @@ Footer {
 #mode_row Label {
     margin: 0 1;
     color: $text;
+}
+#ollama_status_row {
+    height: 2;
+    align: left middle;
+    margin-top: 1;
+    padding: 0 1;
+}
+#ollama_status_label {
+    height: 2;
+    width: 1fr;
+    color: $text-muted;
+    text-style: italic;
+}
+#btn_ollama_refresh {
+    height: 2;
+    min-width: 12;
 }
 #settings_buttons {
     height: 3;
@@ -419,6 +472,7 @@ class LLMClient:
         "Anthropic (Claude)": "https://api.anthropic.com/v1/messages",
         "Groq": "https://api.groq.com/openai/v1/chat/completions",
         "OpenRouter": "https://openrouter.ai/api/v1/chat/completions",
+        OLLAMA_PROVIDER: f"{OLLAMA_BASE_URL}/v1/chat/completions",
     }
     MAX_RETRIES = 5
 
@@ -427,7 +481,8 @@ class LLMClient:
         self.api_key = api_key
         self.model = model
         self.max_tokens = 4096 if mode == "high_quality" else 2048
-        self._http = httpx.AsyncClient(timeout=180.0)
+        timeout = 300.0 if provider == OLLAMA_PROVIDER else 180.0
+        self._http = httpx.AsyncClient(timeout=timeout)
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -436,6 +491,8 @@ class LLMClient:
         base = {"Content-Type": "application/json"}
         if self.provider == "Anthropic (Claude)":
             return {**base, "x-api-key": self.api_key, "anthropic-version": "2023-06-01"}
+        if self.provider == OLLAMA_PROVIDER:
+            return {**base, "Authorization": "Bearer ollama"}
         if self.provider == "OpenRouter":
             return {**base, "Authorization": f"Bearer {self.api_key}",
                     "HTTP-Referer": "https://github.com/669px/pxforge", "X-Title": "pxForge"}
@@ -481,7 +538,7 @@ class LLMClient:
                 if resp.status_code == 429:
                     wait = min((2 ** attempt) + random.uniform(0, 1), 30.0)
                     await asyncio.sleep(wait)
-                    last_exc = Exception(f"Rate limited (429)")
+                    last_exc = Exception("Rate limited (429)")
                     continue
                 if resp.status_code in (500, 502, 503):
                     if attempt < self.MAX_RETRIES - 1:
@@ -493,6 +550,19 @@ class LLMClient:
                     raise ValueError("Empty response from API")
                 return result
             except httpx.TimeoutException as exc:
+                last_exc = exc
+                if self.provider == OLLAMA_PROVIDER:
+                    raise RuntimeError(
+                        f"Ollama timeout for model '{self.model}'. "
+                        "Large models may need more time — try a smaller model."
+                    ) from exc
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(2 ** attempt)
+            except httpx.ConnectError as exc:
+                if self.provider == OLLAMA_PROVIDER:
+                    raise RuntimeError(
+                        "Cannot connect to Ollama. Make sure it is running: ollama serve"
+                    ) from exc
                 last_exc = exc
                 if attempt < self.MAX_RETRIES - 1:
                     await asyncio.sleep(2 ** attempt)
@@ -788,6 +858,7 @@ class SettingsScreen(Screen):
         model = self._safe_model(provider)
         preferred_ai = self._safe_preferred_ai()
         scan_path = self.app.state.get("path", str(Path.cwd()))
+        is_ollama = provider == OLLAMA_PROVIDER
 
         yield Header()
         yield ScrollableContainer(
@@ -801,15 +872,22 @@ class SettingsScreen(Screen):
                 ),
                 Label("API Key:"),
                 Input(
-                    placeholder="Enter API key (or leave blank to use saved/env)",
+                    placeholder="Not required for Ollama" if is_ollama else "Enter API key (or leave blank to use saved/env)",
                     id="inp_key",
                     password=True,
+                    disabled=is_ollama,
                 ),
                 Label("Model:"),
                 Select(
-                    [(m, m) for m in PROVIDER_MODELS[provider]],
-                    value=model,
+                    [(m, m) for m in (PROVIDER_MODELS[provider] or ["(no models — refresh below)"])],
+                    value=model if model else Select.BLANK,
                     id="sel_model",
+                ),
+                Horizontal(
+                    Label("⬤  Checking Ollama...", id="ollama_status_label"),
+                    Button("↻ Refresh", id="btn_ollama_refresh", variant="default"),
+                    id="ollama_status_row",
+                    classes="" if is_ollama else "hidden",
                 ),
                 Label("Mode:"),
                 Horizontal(
@@ -836,7 +914,48 @@ class SettingsScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._load_saved_key()
+        provider = self._safe_provider()
+        if provider == OLLAMA_PROVIDER:
+            self.run_worker(self._probe_ollama(), exclusive=False)
+        else:
+            self._load_saved_key()
+            self._hide_ollama_row()
+
+    def _hide_ollama_row(self) -> None:
+        try:
+            row = self.query_one("#ollama_status_row", Horizontal)
+            row.add_class("hidden")
+        except Exception:
+            pass
+
+    def _show_ollama_row(self) -> None:
+        try:
+            row = self.query_one("#ollama_status_row", Horizontal)
+            row.remove_class("hidden")
+        except Exception:
+            pass
+
+    async def _probe_ollama(self) -> None:
+        self._show_ollama_row()
+        try:
+            lbl = self.query_one("#ollama_status_label", Label)
+            lbl.update("⬤  Connecting to Ollama...")
+        except Exception:
+            pass
+
+        models, status_msg = await fetch_ollama_models()
+
+        try:
+            lbl = self.query_one("#ollama_status_label", Label)
+            dot_color = "green" if models else "red"
+            lbl.update(f"[{dot_color}]⬤[/{dot_color}]  Ollama: {status_msg}")
+        except Exception:
+            pass
+
+        if models:
+            PROVIDER_MODELS[OLLAMA_PROVIDER] = models
+            self.app.state["ollama_models"] = models
+            self._repopulate_model_select(OLLAMA_PROVIDER, models)
 
     def _load_saved_key(self) -> None:
         provider = self.app.state.get("provider", "")
@@ -850,14 +969,32 @@ class SettingsScreen(Screen):
             except Exception:
                 pass
 
-    def _update_model_select(self, provider: str) -> None:
-        models = PROVIDER_MODELS.get(provider, [])
+    def _repopulate_model_select(self, provider: str, models: List[str]) -> None:
+        if not models:
+            models = ["(no models found)"]
         try:
             sel = self.query_one("#sel_model", Select)
             sel.set_options([(m, m) for m in models])
-            if models:
-                sel.value = models[0]
-                self.app.state["model"] = models[0]
+            sel.value = models[0]
+            self.app.state["model"] = models[0]
+        except Exception:
+            pass
+
+    def _update_model_select(self, provider: str) -> None:
+        models = PROVIDER_MODELS.get(provider, [])
+        self._repopulate_model_select(provider, models)
+
+    def _toggle_key_input(self, is_ollama: bool) -> None:
+        try:
+            inp = self.query_one("#inp_key", Input)
+            inp.disabled = is_ollama
+            inp.placeholder = (
+                "Not required for Ollama"
+                if is_ollama
+                else "Enter API key (or leave blank to use saved/env)"
+            )
+            if is_ollama:
+                inp.value = ""
         except Exception:
             pass
 
@@ -869,8 +1006,16 @@ class SettingsScreen(Screen):
         if sel_id == "sel_provider":
             provider = str(event.value)
             self.app.state["provider"] = provider
-            self.call_later(self._update_model_select, provider)
-            self.call_later(self._load_saved_key)
+            is_ollama = provider == OLLAMA_PROVIDER
+            self._toggle_key_input(is_ollama)
+
+            if is_ollama:
+                self._show_ollama_row()
+                self.run_worker(self._probe_ollama(), exclusive=False)
+            else:
+                self._hide_ollama_row()
+                self.call_later(self._update_model_select, provider)
+                self.call_later(self._load_saved_key)
 
         elif sel_id == "sel_model":
             self.app.state["model"] = str(event.value)
@@ -882,25 +1027,51 @@ class SettingsScreen(Screen):
         self.app.state["mode"] = "high_quality" if event.value else "fast"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_ollama_refresh":
+            self.run_worker(self._probe_ollama(), exclusive=False)
+            return
+
         if event.button.id == "btn_back":
             if len(self.app.screen_stack) > 1:
                 self.app.pop_screen()
             else:
                 self.app.exit()
-        elif event.button.id == "btn_start":
-            key = self.query_one("#inp_key", Input).value.strip()
-            if not key:
-                self.notify("API key is required.", severity="error")
-                return
-            self.app.state["api_key"] = key
-            config = load_config()
+            return
+
+        if event.button.id == "btn_start":
             provider = self.app.state.get("provider", "")
-            config[PROVIDER_KEYS.get(provider, "_")] = key
+            is_ollama = provider == OLLAMA_PROVIDER
+
+            if is_ollama:
+                model = self.app.state.get("model", "")
+                if not model or model == "(no models found)" or model == "(no models — refresh below)":
+                    self.notify(
+                        "No Ollama model selected. Pull one first: ollama pull llama3",
+                        severity="error",
+                    )
+                    return
+                self.app.state["api_key"] = "ollama"
+            else:
+                key = self.query_one("#inp_key", Input).value.strip()
+                if not key:
+                    self.notify("API key is required.", severity="error")
+                    return
+                self.app.state["api_key"] = key
+                config = load_config()
+                config[PROVIDER_KEYS.get(provider, "_")] = key
+                config["last_provider"] = provider
+                config["last_model"] = self.app.state.get("model", "")
+                config["last_mode"] = self.app.state.get("mode", "fast")
+                config["preferred_ai"] = self.app.state.get("preferred_ai", "Claude")
+                save_config(config)
+
+            config = load_config()
             config["last_provider"] = provider
             config["last_model"] = self.app.state.get("model", "")
             config["last_mode"] = self.app.state.get("mode", "fast")
             config["preferred_ai"] = self.app.state.get("preferred_ai", "Claude")
             save_config(config)
+
             self.app.push_screen(ProgressScreen())
 
 
@@ -941,11 +1112,23 @@ class ProgressScreen(Screen):
                 progress_given += amt
 
         try:
-            client = LLMClient(state["provider"], state["api_key"], state["model"], state["mode"])
-            lbl.update("Scanning project...")
-            log.write(f"[bold]Provider:[/bold] {state['provider']}  [bold]Model:[/bold] {state['model']}")
+            provider = state["provider"]
+            is_ollama = provider == OLLAMA_PROVIDER
+
+            if is_ollama:
+                log.write(
+                    f"[bold]Provider:[/bold] {provider}  "
+                    f"[bold]Model:[/bold] {state['model']}  "
+                    f"[dim](local — no API key needed)[/dim]"
+                )
+            else:
+                log.write(f"[bold]Provider:[/bold] {provider}  [bold]Model:[/bold] {state['model']}")
+
             log.write(f"[bold]Path:[/bold] {state['path']}")
 
+            client = LLMClient(provider, state["api_key"], state["model"], state["mode"])
+
+            lbl.update("Scanning project...")
             scanner = ProjectScanner()
             tree, files = await scanner.scan(state["path"], log)
 
@@ -959,6 +1142,13 @@ class ProgressScreen(Screen):
                 f"[green]{analyzable}[/green] analyzable, "
                 f"[dim]{binary_count} binary, {skipped_count} skipped[/dim]"
             )
+
+            if is_ollama and analyzable > 10:
+                log.write(
+                    f"[yellow]⚠  Ollama processes sequentially (concurrency=2). "
+                    f"{analyzable} files may take a while.[/yellow]"
+                )
+
             advance(5)
 
             per_file = (70 / total_files) if total_files > 0 else 0
@@ -1174,7 +1364,7 @@ class pxForgeApp(App):
 
         saved_model = config.get("last_model", "")
         if saved_model not in PROVIDER_MODELS.get(saved_provider, []):
-            saved_model = PROVIDER_MODELS[saved_provider][0]
+            saved_model = PROVIDER_MODELS[saved_provider][0] if PROVIDER_MODELS.get(saved_provider) else ""
 
         preferred_ai = config.get("preferred_ai", "Claude")
         if preferred_ai not in AI_BROWSER_SERVICES:
@@ -1190,6 +1380,7 @@ class pxForgeApp(App):
             "output": "",
             "preferred_ai": preferred_ai,
             "file_stats": {},
+            "ollama_models": [],
         }
 
     def on_mount(self) -> None:

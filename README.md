@@ -60,7 +60,7 @@ sudo apt install wl-clipboard  # Wayland
 git clone https://github.com/669px/pxforge.git
 cd pxforge
 pip install -r requirements.txt
-python pxforge.py install
+python3 pxforge.py install
 ```
 
 Then reload your shell:

@@ -164,16 +164,6 @@ async def fetch_ollama_models() -> Tuple[List[str], str]:
         return [], f"error — {e}"
 
 
-def fetch_ollama_models_sync() -> Tuple[List[str], str]:
-    try:
-        return asyncio.run(fetch_ollama_models())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(fetch_ollama_models())
-        finally:
-            loop.close()
-
 
 APP_CSS = """
 Screen {
@@ -887,7 +877,7 @@ class SettingsScreen(Screen):
                     Label("⬤  Checking Ollama...", id="ollama_status_label"),
                     Button("↻ Refresh", id="btn_ollama_refresh", variant="default"),
                     id="ollama_status_row",
-                    classes="" if is_ollama else "hidden",
+                    classes=None if is_ollama else "hidden",
                 ),
                 Label("Mode:"),
                 Horizontal(
@@ -953,16 +943,17 @@ class SettingsScreen(Screen):
             pass
 
         if models:
-            PROVIDER_MODELS[OLLAMA_PROVIDER] = models
             self.app.state["ollama_models"] = models
             self._repopulate_model_select(OLLAMA_PROVIDER, models)
 
     def _load_saved_key(self) -> None:
         provider = self.app.state.get("provider", "")
+        config_key = PROVIDER_KEYS.get(provider, "")
+        env_key = PROVIDER_ENV.get(provider, "")
+        if not config_key and not env_key:
+            return
         config = load_config()
-        key = config.get(PROVIDER_KEYS.get(provider, ""), "")
-        if not key:
-            key = os.getenv(PROVIDER_ENV.get(provider, ""), "")
+        key = (config.get(config_key, "") if config_key else "") or (os.getenv(env_key, "") if env_key else "")
         if key:
             try:
                 self.query_one("#inp_key", Input).value = key
@@ -1041,10 +1032,11 @@ class SettingsScreen(Screen):
         if event.button.id == "btn_start":
             provider = self.app.state.get("provider", "")
             is_ollama = provider == OLLAMA_PROVIDER
+            _no_model_sentinels = {"(no models found)", "(no models — refresh below)"}
 
             if is_ollama:
                 model = self.app.state.get("model", "")
-                if not model or model == "(no models found)" or model == "(no models — refresh below)":
+                if not model or model in _no_model_sentinels:
                     self.notify(
                         "No Ollama model selected. Pull one first: ollama pull llama3",
                         severity="error",
@@ -1057,15 +1049,12 @@ class SettingsScreen(Screen):
                     self.notify("API key is required.", severity="error")
                     return
                 self.app.state["api_key"] = key
-                config = load_config()
-                config[PROVIDER_KEYS.get(provider, "_")] = key
-                config["last_provider"] = provider
-                config["last_model"] = self.app.state.get("model", "")
-                config["last_mode"] = self.app.state.get("mode", "fast")
-                config["preferred_ai"] = self.app.state.get("preferred_ai", "Claude")
-                save_config(config)
 
             config = load_config()
+            if not is_ollama:
+                config_key = PROVIDER_KEYS.get(provider, "")
+                if config_key:
+                    config[config_key] = self.app.state["api_key"]
             config["last_provider"] = provider
             config["last_model"] = self.app.state.get("model", "")
             config["last_mode"] = self.app.state.get("mode", "fast")

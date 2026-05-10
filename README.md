@@ -49,7 +49,14 @@ Paste it once. Your AI assistant is now a collaborator who actually knows the co
 
 **Requirements:** Python 3.10+
 
+### Linux
+
 ```bash
+# Install system dependencies (clipboard support)
+sudo apt install xclip        # X11
+sudo apt install wl-clipboard  # Wayland
+
+# Clone and install
 git clone https://github.com/669px/pxforge.git
 cd pxforge
 pip install -r requirements.txt
@@ -61,6 +68,30 @@ Then reload your shell:
 ```bash
 source ~/.bashrc   # bash
 source ~/.zshrc    # zsh
+exec fish          # fish
+```
+
+The `install` command writes a wrapper script to `~/.local/bin/pxforge` and adds it to your `PATH` automatically. After reloading your shell, `pxforge` works from anywhere.
+
+### macOS
+
+```bash
+git clone https://github.com/669px/pxforge.git
+cd pxforge
+pip install -r requirements.txt
+python pxforge.py install
+source ~/.zshrc
+```
+
+Clipboard support works out of the box via `pbcopy` — no extra dependencies needed.
+
+### Without installing to PATH
+
+You can always run it directly without the install step:
+
+```bash
+python pxforge.py .
+python pxforge.py /path/to/project
 ```
 
 ---

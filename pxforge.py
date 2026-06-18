@@ -4,6 +4,7 @@ import json
 import stat
 import asyncio
 import random
+import fnmatch
 import webbrowser
 import subprocess
 from pathlib import Path
@@ -77,6 +78,83 @@ IGNORED_DIRS = {
     '.venv', 'env', 'venv', '.next', '.nuxt', 'coverage', '.cache',
     '.idea', '.vscode', 'target', 'out', '.gradle',
     '.mypy_cache', '.pytest_cache', '.ruff_cache', 'vendor',
+    '.tox', '.nox', '.eggs', '.egg-info', 'pip-wheel-metadata',
+    'htmlcov', 'site-packages', 'lib64', 'parts', 'sdist', 'wheels',
+    'celerybeat-schedule', '.scrapy', '.spyderproject',
+    '.spyproject', '.ropeproject', '.dmypy.json',
+    '.pyre', '.pytype', 'cython_debug', '__pypackages__',
+    '.terraform', '.serverless', '.nyc_output', '.hypothesis',
+    '.coverage', '.serverless_nextjs', '.serverless_nuxt', '.vuepress',
+    '.docusaurus', '.gatsby', '.gridsome', '.sapper', '.svelte-kit',
+    '.output', '.nitro', '.wrangler', '.vercel', '.netlify',
+    '.now', '.heroku', '.fly', '.render', '.k8s', '.kubernetes',
+    '.helm', '.chart', '.argo', '.tekton', '.jenkins', '.travis',
+    '.circleci', '.appveyor', '.codecov', '.coveralls', '.snyk',
+    '.dependabot', '.renovate', '.pre-commit', '.husky',
+    '.lint-staged', '.commitlint', '.semantic-release', '.changeset',
+    '.buildkite', '.drone', '.semaphore', '.wercker', '.codeship',
+    '.shippable', '.snap', '.snapcraft', '.flatpak', '.appimage',
+    '.deb', '.rpm', '.pkg', '.msi', '.dmg', '.unity', '.unreal',
+    '.godot', '.cocos', '.defold', '.love', '.panda3d', '.raylib',
+    '.sfml', '.sdl', '.glfw', '.glew', '.glm', '.stb', '.imgui',
+    '.implot', '.imnodes', '.imguizmo', '.nuklear', '.microui',
+    '.raygui', '.cimgui', '.imfiledialog', '.imgui_memory_editor',
+    '.imgui_club', '.imgui_markdown', '.imgui_tex_inspect',
+    '.imgui_toggle', '.imgui_knobs', '.imgui_color_text_edit',
+    '.imgui_color_picker', '.imgui_color_gradient', '.imgui_color_palette',
+    '.imgui_color_wheel', '.imgui_color_box', '.imgui_color_button',
+    '.imgui_color_popup', '.imgui_color_tooltip', '.imgui_color_picker_flags',
+    '.imgui_color_edit_flags', '.imgui_color_display_flags',
+    '.imgui_color_input_flags', '.imgui_color_button_flags',
+    '.imgui_color_flags', '.imgui_color', '.imgui', '.implot',
+    '.imnodes', '.imguizmo', '.imfd', '.ime', '.imgui_markdown',
+    '.imgui_tex_inspect', '.imgui_toggle', '.imgui_knobs',
+    '.imgui_color_text_edit', '.imgui_color_picker', '.imgui_color_gradient',
+    '.imgui_color_palette', '.imgui_color_wheel', '.imgui_color_box',
+    '.imgui_color_button', '.imgui_color_popup', '.imgui_color_tooltip',
+    '.imgui_color_picker_flags', '.imgui_color_edit_flags',
+    '.imgui_color_display_flags', '.imgui_color_input_flags',
+    '.imgui_color_button_flags', '.imgui_color_flags', '.imgui_color',
+    '.env', '.env.local', '.env.development', '.env.production',
+    '.env.test', '.env.staging', '.env.example', '.env.sample',
+    '.env.template', '.env.backup', '.env.bak', '.env.old',
+    '.env.previous', '.env.orig', '.env.rej', '.env.dist',
+    '.env.dev', '.env.prod', '.env.ci', '.env.docker',
+    '.env.kubernetes', '.env.k8s', '.env.helm', '.env.chart',
+    '.env.argo', '.env.tekton', '.env.jenkins', '.env.travis',
+    '.env.circleci', '.env.appveyor', '.env.codecov', '.env.coveralls',
+    '.env.snyk', '.env.dependabot', '.env.renovate', '.env.pre-commit',
+    '.env.husky', '.env.lint-staged', '.env.commitlint',
+    '.env.semantic-release', '.env.changeset', '.env.buildkite',
+    '.env.drone', '.env.semaphore', '.env.wercker', '.env.codeship',
+    '.env.shippable', '.env.snap', '.env.snapcraft', '.env.flatpak',
+    '.env.appimage', '.env.deb', '.env.rpm', '.env.pkg', '.env.msi',
+    '.env.dmg', '.env.unity', '.env.unreal', '.env.godot', '.env.cocos',
+    '.env.defold', '.env.love', '.env.panda3d', '.env.raylib',
+    '.env.sfml', '.env.sdl', '.env.glfw', '.env.glew', '.env.glm',
+    '.env.stb', '.env.imgui', '.env.implot', '.env.imnodes',
+    '.env.imguizmo', '.env.nuklear', '.env.microui', '.env.raygui',
+    '.env.cimgui', '.env.imfiledialog', '.env.imgui_memory_editor',
+    '.env.imgui_club', '.env.imgui_markdown', '.env.imgui_tex_inspect',
+    '.env.imgui_toggle', '.env.imgui_knobs', '.env.imgui_color_text_edit',
+    '.env.imgui_color_picker', '.env.imgui_color_gradient',
+    '.env.imgui_color_palette', '.env.imgui_color_wheel',
+    '.env.imgui_color_box', '.env.imgui_color_button',
+    '.env.imgui_color_popup', '.env.imgui_color_tooltip',
+    '.env.imgui_color_picker_flags', '.env.imgui_color_edit_flags',
+    '.env.imgui_color_display_flags', '.env.imgui_color_input_flags',
+    '.env.imgui_color_button_flags', '.env.imgui_color_flags',
+    '.env.imgui_color', '.env.imgui', '.env.implot', '.env.imnodes',
+    '.env.imguizmo', '.env.imfd', '.env.ime', '.env.imgui_markdown',
+    '.env.imgui_tex_inspect', '.env.imgui_toggle', '.env.imgui_knobs',
+    '.env.imgui_color_text_edit', '.env.imgui_color_picker',
+    '.env.imgui_color_gradient', '.env.imgui_color_palette',
+    '.env.imgui_color_wheel', '.env.imgui_color_box',
+    '.env.imgui_color_button', '.env.imgui_color_popup',
+    '.env.imgui_color_tooltip', '.env.imgui_color_picker_flags',
+    '.env.imgui_color_edit_flags', '.env.imgui_color_display_flags',
+    '.env.imgui_color_input_flags', '.env.imgui_color_button_flags',
+    '.env.imgui_color_flags', '.env.imgui_color', '.env',
 }
 IGNORED_EXT = {
     '.pyc', '.pyo', '.exe', '.dll', '.so', '.dylib', '.whl',
@@ -164,6 +242,54 @@ async def fetch_ollama_models() -> Tuple[List[str], str]:
         return [], f"error — {e}"
 
 
+class GitignoreParser:
+    def __init__(self, base_path: str):
+        self.base = Path(base_path).resolve()
+        self.patterns = []
+        self.negations = []
+        gi = self.base / ".gitignore"
+        if gi.exists():
+            with open(gi, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        if line.startswith("!"):
+                            self.negations.append(line[1:].rstrip("/"))
+                        else:
+                            self.patterns.append(line.rstrip("/"))
+
+    def is_ignored(self, path: str) -> bool:
+        try:
+            rel = Path(path).resolve().relative_to(self.base)
+        except ValueError:
+            return False
+        rel_str = str(rel).replace(os.sep, "/")
+        rel_dir = rel_str + "/"
+        parts = rel.parts
+
+        for pat in self.patterns:
+            if self._match(rel_str, rel_dir, pat, parts):
+                for neg in self.negations:
+                    if self._match(rel_str, rel_dir, neg, parts):
+                        break
+                else:
+                    return True
+        return False
+
+    def _match(self, rel_str, rel_dir, pat, parts):
+        if pat.startswith("/"):
+            p = pat[1:]
+            if fnmatch.fnmatch(rel_str, p) or fnmatch.fnmatch(rel_dir, p + "/"):
+                return True
+        else:
+            if fnmatch.fnmatch(rel_str, pat) or fnmatch.fnmatch(rel_dir, pat + "/"):
+                return True
+            for i in range(len(parts)):
+                sub = "/".join(parts[i:])
+                if fnmatch.fnmatch(sub, pat) or fnmatch.fnmatch(sub + "/", pat + "/"):
+                    return True
+        return False
+
 
 APP_CSS = """
 Screen {
@@ -178,7 +304,6 @@ Footer {
     background: $primary-darken-2;
 }
 
-/* ── Dir Select ── */
 #dir_select_container {
     width: 100%;
     height: 100%;
@@ -208,7 +333,6 @@ Footer {
     margin-top: 1;
 }
 
-/* ── Settings ── */
 #settings_scroll {
     width: 100%;
     height: 100%;
@@ -270,7 +394,6 @@ Footer {
     margin-top: 2;
 }
 
-/* ── Progress ── */
 #progress_container {
     width: 100%;
     height: 100%;
@@ -292,7 +415,6 @@ Footer {
     padding: 0 1;
 }
 
-/* ── Output ── */
 #output_section {
     width: 100%;
     height: 100%;
@@ -400,59 +522,43 @@ def copy_to_clipboard(content: str) -> bool:
         return False
 
 
-SYSTEM_ANALYST = """\
-You are an expert code analyst embedded in pxForge, a tool that generates AI-ready project context documents.
-
-Your job is to analyze source code and text files with precision and brevity. For every file or chunk you receive:
-- Identify the primary purpose of the code
-- List key functions, classes, or components and what they do
-- Note external dependencies and imports
-- Highlight non-obvious logic, patterns, or architectural decisions
-
+SYSTEM_ANALYST = """You are a senior code analyst. Analyze the provided file and extract:
+- Purpose: what this file does
+- Key symbols: functions, classes, variables that matter
+- Dependencies: imports, external libraries, internal modules it relies on
+- Logic: non-obvious patterns, algorithms, or architectural decisions
 Rules:
-- Be concise. Bullet points over prose.
-- Never summarize what is obvious from the code structure alone.
-- Do not include line numbers, only names and behaviors.
-- If the content is configuration or data (JSON, YAML, env), describe what it configures and what values matter.
-- If the content is a markup or template file, describe its role in the UI or build pipeline.
+- Be concise. Use bullets.
+- No line numbers.
+- Skip obvious structural observations.
+- For config/data files, describe what they configure and which values are critical.
 """
 
-SYSTEM_ARCHITECT = """\
-You are a senior software architect embedded in pxForge, a tool that generates AI-ready project context documents.
-
-Your job is to synthesize file-level analyses into a high-level project overview. You will receive a directory tree and per-file summaries.
-
-Produce a concise PROJECT SUMMARY that covers:
-- The technology stack (languages, frameworks, major libraries)
-- The architectural pattern (MVC, microservices, monolith, CLI tool, etc.)
-- The core functionality and purpose of the project
-- How the major components relate to each other
-
+SYSTEM_ARCHITECT = """You are a senior software architect. Synthesize the directory tree and file analyses into a project overview.
+Cover:
+1. Technology stack (languages, frameworks, major libraries)
+2. Architecture (pattern, how components interact)
+3. Core functionality (what this project does)
+4. Entry points and data flow
 Rules:
-- Write in clear, direct technical prose. No fluff.
-- Three to six paragraphs maximum.
-- Do not repeat information that is obvious from the file names alone.
-- Focus on what a new developer needs to understand to be productive immediately.
+- 3-5 paragraphs max.
+- Direct technical prose. No fluff.
+- Focus on what a new developer needs to be productive immediately.
 """
 
-SYSTEM_PROMPT_ENGINEER = """\
-You are an expert AI prompt engineer embedded in pxForge, a tool that generates AI-ready project context documents.
-
-Your job is to produce a system prompt that will be used to configure an AI coding assistant working on this specific project. You will receive a full project summary, directory structure, and per-file analyses.
-
-The system prompt you write must:
-- Establish the AI's role as a knowledgeable collaborator on this exact codebase
-- Summarize the project's purpose, stack, and architecture in two to three sentences
-- List the key conventions, patterns, and constraints the AI must respect (naming, structure, idioms)
-- Describe what the AI should always do (e.g. follow existing patterns, use existing utilities, write idiomatic code)
-- Describe what the AI must never do (e.g. introduce new dependencies without asking, break existing interfaces)
-- Include a section on the directory layout so the AI knows where things live
-
+SYSTEM_PROMPT_ENGINEER = """You are an expert prompt engineer. Generate a system prompt for an AI coding assistant working on this specific project.
+The prompt must:
+1. Define the AI's role as an expert collaborator on this codebase
+2. Summarize the project's purpose, stack, and architecture in 2-3 sentences
+3. List key conventions (naming, structure, idioms) the AI must follow
+4. State what the AI should always do (use existing utilities, follow patterns, write idiomatic code)
+5. State what the AI must never do (add dependencies without approval, break interfaces, duplicate utilities)
+6. Include the directory layout so the AI knows where files live
 Rules:
-- Write in second person ("You are...", "You must...", "Never...").
-- Be specific to this project. Generic advice that applies to any codebase has no value here.
-- The prompt must be immediately usable as a system prompt in any AI coding assistant (Cursor, Claude, Copilot Chat, etc.).
-- Keep it under 800 words.
+- Second person ("You are...", "You must...", "Never...").
+- Specific to this project. No generic advice.
+- Immediately usable in Cursor, Claude, Copilot Chat, etc.
+- Under 600 words.
 """
 
 
@@ -569,22 +675,6 @@ class LLMClient:
         raise last_exc or RuntimeError("Max retries exceeded")
 
 
-def _listdir_filtered(dirpath: str) -> List[Tuple[str, str, bool]]:
-    try:
-        entries = sorted(os.scandir(dirpath), key=lambda e: (not e.is_dir(), e.name.lower()))
-    except PermissionError:
-        return []
-    result = []
-    for entry in entries:
-        if entry.name in IGNORED_DIRS:
-            continue
-        ext = Path(entry.name).suffix.lower()
-        if entry.is_file(follow_symlinks=False) and ext in IGNORED_EXT:
-            continue
-        result.append((entry.name, entry.path, entry.is_dir(follow_symlinks=False)))
-    return result
-
-
 def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
     ext = Path(filepath).suffix.lower()
     try:
@@ -595,13 +685,14 @@ def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
                 "content": None, "skipped": True, "reason": f"too large ({size // 1024}KB)",
             }
         with open(filepath, "rb") as f:
-            header = f.read(16)
-        if any(header.startswith(m) for m in BINARY_MARKERS):
-            return {"path": filepath, "type": ext, "is_binary": True, "content": None, "skipped": False}
-        if b'\x00' in header:
-            return {"path": filepath, "type": ext, "is_binary": True, "content": None, "skipped": False}
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
+            header = f.read(8192)
+            if any(header.startswith(m) for m in BINARY_MARKERS) or b'\x00' in header:
+                return {"path": filepath, "type": ext, "is_binary": True, "content": None, "skipped": False}
+            if size <= 8192:
+                raw = header
+            else:
+                raw = header + f.read()
+        content = raw.decode("utf-8", errors="ignore")
         return {"path": filepath, "type": ext, "is_binary": False, "content": content, "skipped": False}
     except PermissionError:
         return {
@@ -615,46 +706,61 @@ def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
 class ProjectScanner:
     async def scan(self, path: str, log: RichLog) -> Tuple[str, List[Dict[str, Any]]]:
         log.write("[bold cyan]Walking directory tree...[/bold cyan]")
-        tree_lines, files = await self._walk(path, "")
-        return "\n".join(tree_lines), files
+        tree, file_paths = await asyncio.to_thread(self._build_tree, path)
+        log.write(f"[bold cyan]Reading {len(file_paths)} files...[/bold cyan]")
+        files = await self._read_files(file_paths)
+        return tree, files
 
-    async def _walk(self, dirpath: str, prefix: str) -> Tuple[List[str], List[Dict[str, Any]]]:
-        entries = await asyncio.to_thread(_listdir_filtered, dirpath)
-        tree_lines: List[str] = []
-        file_paths: List[str] = []
-        subdir_tasks: List[Tuple[int, str, str]] = []
+    def _build_tree(self, path: str) -> Tuple[str, List[str]]:
+        base = Path(path).resolve()
+        gitignore = GitignoreParser(str(base))
+        tree_lines = []
+        file_paths = []
 
-        for i, (name, full_path, is_dir) in enumerate(entries):
-            is_last = i == len(entries) - 1
-            connector = "└── " if is_last else "├── "
-            child_prefix = prefix + ("    " if is_last else "│   ")
-            tree_lines.append(f"{prefix}{connector}{name}")
-            if is_dir:
-                subdir_tasks.append((len(tree_lines) - 1, full_path, child_prefix))
-            else:
-                file_paths.append(full_path)
+        def walk(dirpath: str, prefix: str):
+            try:
+                entries = sorted(os.scandir(dirpath), key=lambda e: (not e.is_dir(), e.name.lower()))
+            except PermissionError:
+                return
 
-        file_infos: List[Dict[str, Any]] = []
-        if file_paths:
-            read_results = await asyncio.gather(
-                *[asyncio.to_thread(_read_file_sync, p) for p in file_paths]
-            )
-            file_infos = [r for r in read_results if r is not None]
+            filtered = []
+            for entry in entries:
+                if entry.is_dir(follow_symlinks=False):
+                    if entry.name in IGNORED_DIRS:
+                        continue
+                    if gitignore.is_ignored(entry.path):
+                        continue
+                    filtered.append(entry)
+                elif entry.is_file(follow_symlinks=False):
+                    ext = Path(entry.name).suffix.lower()
+                    if ext in IGNORED_EXT:
+                        continue
+                    if gitignore.is_ignored(entry.path):
+                        continue
+                    filtered.append(entry)
 
-        if subdir_tasks:
-            sub_results = await asyncio.gather(
-                *[self._walk(fp, cp) for _, fp, cp in subdir_tasks]
-            )
-            final_lines = list(tree_lines)
-            offset = 0
-            for (insert_idx, _, _), (sub_lines, sub_files) in zip(subdir_tasks, sub_results):
-                pos = insert_idx + 1 + offset
-                final_lines[pos:pos] = sub_lines
-                offset += len(sub_lines)
-                file_infos.extend(sub_files)
-            return final_lines, file_infos
+            for i, entry in enumerate(filtered):
+                is_last = i == len(filtered) - 1
+                connector = "└── " if is_last else "├── "
+                tree_lines.append(f"{prefix}{connector}{entry.name}")
+                if entry.is_dir():
+                    child_prefix = prefix + ("    " if is_last else "│   ")
+                    walk(entry.path, child_prefix)
+                else:
+                    file_paths.append(entry.path)
 
-        return tree_lines, file_infos
+        walk(str(base), "")
+        return "\n".join(tree_lines), file_paths
+
+    async def _read_files(self, file_paths: List[str]) -> List[Dict[str, Any]]:
+        sem = asyncio.Semaphore(50)
+
+        async def read_one(fp: str) -> Optional[Dict[str, Any]]:
+            async with sem:
+                return await asyncio.to_thread(_read_file_sync, fp)
+
+        results = await asyncio.gather(*[read_one(fp) for fp in file_paths])
+        return [r for r in results if r is not None]
 
 
 class FileAnalyzer:

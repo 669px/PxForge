@@ -7,6 +7,7 @@ import random
 import fnmatch
 import webbrowser
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import httpx
@@ -25,6 +26,9 @@ SCRIPT_PATH = Path(__file__).resolve()
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_PROVIDER = "Ollama (Local)"
+
+IO_WORKERS = min(128, (os.cpu_count() or 4) * 16)
+IO_EXECUTOR = ThreadPoolExecutor(max_workers=IO_WORKERS, thread_name_prefix="pxforge-io")
 
 AI_BROWSER_SERVICES = {
     "Claude": "https://claude.ai",
@@ -74,96 +78,30 @@ def install_to_path() -> None:
 
 
 IGNORED_DIRS = {
-    '.git', 'node_modules', 'dist', 'build', '__pycache__',
-    '.venv', 'env', 'venv', '.next', '.nuxt', 'coverage', '.cache',
-    '.idea', '.vscode', 'target', 'out', '.gradle',
-    '.mypy_cache', '.pytest_cache', '.ruff_cache', 'vendor',
-    '.tox', '.nox', '.eggs', '.egg-info', 'pip-wheel-metadata',
-    'htmlcov', 'site-packages', 'lib64', 'parts', 'sdist', 'wheels',
-    'celerybeat-schedule', '.scrapy', '.spyderproject',
-    '.spyproject', '.ropeproject', '.dmypy.json',
-    '.pyre', '.pytype', 'cython_debug', '__pypackages__',
-    '.terraform', '.serverless', '.nyc_output', '.hypothesis',
-    '.coverage', '.serverless_nextjs', '.serverless_nuxt', '.vuepress',
-    '.docusaurus', '.gatsby', '.gridsome', '.sapper', '.svelte-kit',
-    '.output', '.nitro', '.wrangler', '.vercel', '.netlify',
-    '.now', '.heroku', '.fly', '.render', '.k8s', '.kubernetes',
-    '.helm', '.chart', '.argo', '.tekton', '.jenkins', '.travis',
-    '.circleci', '.appveyor', '.codecov', '.coveralls', '.snyk',
-    '.dependabot', '.renovate', '.pre-commit', '.husky',
-    '.lint-staged', '.commitlint', '.semantic-release', '.changeset',
-    '.buildkite', '.drone', '.semaphore', '.wercker', '.codeship',
-    '.shippable', '.snap', '.snapcraft', '.flatpak', '.appimage',
-    '.deb', '.rpm', '.pkg', '.msi', '.dmg', '.unity', '.unreal',
-    '.godot', '.cocos', '.defold', '.love', '.panda3d', '.raylib',
-    '.sfml', '.sdl', '.glfw', '.glew', '.glm', '.stb', '.imgui',
-    '.implot', '.imnodes', '.imguizmo', '.nuklear', '.microui',
-    '.raygui', '.cimgui', '.imfiledialog', '.imgui_memory_editor',
-    '.imgui_club', '.imgui_markdown', '.imgui_tex_inspect',
-    '.imgui_toggle', '.imgui_knobs', '.imgui_color_text_edit',
-    '.imgui_color_picker', '.imgui_color_gradient', '.imgui_color_palette',
-    '.imgui_color_wheel', '.imgui_color_box', '.imgui_color_button',
-    '.imgui_color_popup', '.imgui_color_tooltip', '.imgui_color_picker_flags',
-    '.imgui_color_edit_flags', '.imgui_color_display_flags',
-    '.imgui_color_input_flags', '.imgui_color_button_flags',
-    '.imgui_color_flags', '.imgui_color', '.imgui', '.implot',
-    '.imnodes', '.imguizmo', '.imfd', '.ime', '.imgui_markdown',
-    '.imgui_tex_inspect', '.imgui_toggle', '.imgui_knobs',
-    '.imgui_color_text_edit', '.imgui_color_picker', '.imgui_color_gradient',
-    '.imgui_color_palette', '.imgui_color_wheel', '.imgui_color_box',
-    '.imgui_color_button', '.imgui_color_popup', '.imgui_color_tooltip',
-    '.imgui_color_picker_flags', '.imgui_color_edit_flags',
-    '.imgui_color_display_flags', '.imgui_color_input_flags',
-    '.imgui_color_button_flags', '.imgui_color_flags', '.imgui_color',
-    '.env', '.env.local', '.env.development', '.env.production',
-    '.env.test', '.env.staging', '.env.example', '.env.sample',
-    '.env.template', '.env.backup', '.env.bak', '.env.old',
-    '.env.previous', '.env.orig', '.env.rej', '.env.dist',
-    '.env.dev', '.env.prod', '.env.ci', '.env.docker',
-    '.env.kubernetes', '.env.k8s', '.env.helm', '.env.chart',
-    '.env.argo', '.env.tekton', '.env.jenkins', '.env.travis',
-    '.env.circleci', '.env.appveyor', '.env.codecov', '.env.coveralls',
-    '.env.snyk', '.env.dependabot', '.env.renovate', '.env.pre-commit',
-    '.env.husky', '.env.lint-staged', '.env.commitlint',
-    '.env.semantic-release', '.env.changeset', '.env.buildkite',
-    '.env.drone', '.env.semaphore', '.env.wercker', '.env.codeship',
-    '.env.shippable', '.env.snap', '.env.snapcraft', '.env.flatpak',
-    '.env.appimage', '.env.deb', '.env.rpm', '.env.pkg', '.env.msi',
-    '.env.dmg', '.env.unity', '.env.unreal', '.env.godot', '.env.cocos',
-    '.env.defold', '.env.love', '.env.panda3d', '.env.raylib',
-    '.env.sfml', '.env.sdl', '.env.glfw', '.env.glew', '.env.glm',
-    '.env.stb', '.env.imgui', '.env.implot', '.env.imnodes',
-    '.env.imguizmo', '.env.nuklear', '.env.microui', '.env.raygui',
-    '.env.cimgui', '.env.imfiledialog', '.env.imgui_memory_editor',
-    '.env.imgui_club', '.env.imgui_markdown', '.env.imgui_tex_inspect',
-    '.env.imgui_toggle', '.env.imgui_knobs', '.env.imgui_color_text_edit',
-    '.env.imgui_color_picker', '.env.imgui_color_gradient',
-    '.env.imgui_color_palette', '.env.imgui_color_wheel',
-    '.env.imgui_color_box', '.env.imgui_color_button',
-    '.env.imgui_color_popup', '.env.imgui_color_tooltip',
-    '.env.imgui_color_picker_flags', '.env.imgui_color_edit_flags',
-    '.env.imgui_color_display_flags', '.env.imgui_color_input_flags',
-    '.env.imgui_color_button_flags', '.env.imgui_color_flags',
-    '.env.imgui_color', '.env.imgui', '.env.implot', '.env.imnodes',
-    '.env.imguizmo', '.env.imfd', '.env.ime', '.env.imgui_markdown',
-    '.env.imgui_tex_inspect', '.env.imgui_toggle', '.env.imgui_knobs',
-    '.env.imgui_color_text_edit', '.env.imgui_color_picker',
-    '.env.imgui_color_gradient', '.env.imgui_color_palette',
-    '.env.imgui_color_wheel', '.env.imgui_color_box',
-    '.env.imgui_color_button', '.env.imgui_color_popup',
-    '.env.imgui_color_tooltip', '.env.imgui_color_picker_flags',
-    '.env.imgui_color_edit_flags', '.env.imgui_color_display_flags',
-    '.env.imgui_color_input_flags', '.env.imgui_color_button_flags',
-    '.env.imgui_color_flags', '.env.imgui_color', '.env',
+    '.git', '.hg', '.svn', '.venv', 'venv', 'env', '.env',
+    'node_modules', 'bower_components', 'vendor',
+    'dist', 'build', 'out', 'target', '__pycache__',
+    '.next', '.nuxt', '.svelte-kit', '.output', '.vercel', '.netlify',
+    '.cache', '.turbo', '.parcel-cache', '.yarn',
+    'coverage', 'htmlcov', '.nyc_output', '.hypothesis',
+    '.idea', '.vscode', '.vs',
+    '.mypy_cache', '.pytest_cache', '.ruff_cache', '.tox', '.nox',
+    'egg-info', '.eggs', 'site-packages', '__pypackages__',
+    '.terraform', '.serverless', '.gradle', '.dart_tool',
+    'Pods', 'DerivedData', '.dSYM',
 }
 IGNORED_EXT = {
     '.pyc', '.pyo', '.exe', '.dll', '.so', '.dylib', '.whl',
     '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar',
     '.bin', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
-    '.pdf', '.mp3', '.mp4', '.avi', '.lock', '.bmp', '.webp',
-    '.tiff', '.wav', '.ogg', '.flac', '.ttf', '.woff', '.woff2', '.eot',
+    '.pdf', '.mp3', '.mp4', '.mov', '.avi', '.lock', '.bmp', '.webp',
+    '.tiff', '.heic', '.psd', '.wav', '.ogg', '.flac',
+    '.ttf', '.woff', '.woff2', '.eot',
     '.class', '.o', '.a', '.lib', '.pdb', '.map',
     '.suo', '.user', '.orig', '.rej',
+}
+IGNORED_FILES = {
+    'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'go.sum',
 }
 BINARY_MARKERS = (
     b'\x7fELF', b'\x89PNG', b'\xff\xd8\xff',
@@ -192,10 +130,10 @@ PROVIDER_ENV = {
 PROVIDER_MODELS: Dict[str, List[str]] = {
     "OpenAI": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3-mini"],
     "Anthropic (Claude)": [
-        "claude-sonnet-4-20250514",
-        "claude-opus-4-20250514",
+        "claude-sonnet-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
         "claude-haiku-4-5-20251001",
-        "claude-3-5-sonnet-20241022",
     ],
     "Groq": [
         "llama-3.3-70b-versatile",
@@ -243,52 +181,51 @@ async def fetch_ollama_models() -> Tuple[List[str], str]:
 
 
 class GitignoreParser:
-    def __init__(self, base_path: str):
-        self.base = Path(base_path).resolve()
-        self.patterns = []
-        self.negations = []
-        gi = self.base / ".gitignore"
-        if gi.exists():
+    __slots__ = ("prefix", "rules")
+
+    def __init__(self, dir_path: str):
+        self.prefix = dir_path + os.sep
+        self.rules: List[Tuple[str, bool]] = []
+        gi = os.path.join(dir_path, ".gitignore")
+        try:
             with open(gi, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     line = line.strip()
-                    if line and not line.startswith("#"):
-                        if line.startswith("!"):
-                            self.negations.append(line[1:].rstrip("/"))
-                        else:
-                            self.patterns.append(line.rstrip("/"))
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("!"):
+                        self.rules.append((line[1:].rstrip("/"), True))
+                    else:
+                        self.rules.append((line.rstrip("/"), False))
+        except (FileNotFoundError, PermissionError, IsADirectoryError):
+            pass
 
-    def is_ignored(self, path: str) -> bool:
-        try:
-            rel = Path(path).resolve().relative_to(self.base)
-        except ValueError:
-            return False
-        rel_str = str(rel).replace(os.sep, "/")
-        rel_dir = rel_str + "/"
-        parts = rel.parts
-
-        for pat in self.patterns:
-            if self._match(rel_str, rel_dir, pat, parts):
-                for neg in self.negations:
-                    if self._match(rel_str, rel_dir, neg, parts):
-                        break
-                else:
-                    return True
-        return False
-
-    def _match(self, rel_str, rel_dir, pat, parts):
+    @staticmethod
+    def _match(rel_str: str, rel_dir: str, pat: str, parts: List[str]) -> bool:
         if pat.startswith("/"):
             p = pat[1:]
-            if fnmatch.fnmatch(rel_str, p) or fnmatch.fnmatch(rel_dir, p + "/"):
+            return fnmatch.fnmatch(rel_str, p) or fnmatch.fnmatch(rel_dir, p + "/")
+        if fnmatch.fnmatch(rel_str, pat) or fnmatch.fnmatch(rel_dir, pat + "/"):
+            return True
+        for i in range(len(parts)):
+            sub = "/".join(parts[i:])
+            if fnmatch.fnmatch(sub, pat) or fnmatch.fnmatch(sub + "/", pat + "/"):
                 return True
-        else:
-            if fnmatch.fnmatch(rel_str, pat) or fnmatch.fnmatch(rel_dir, pat + "/"):
-                return True
-            for i in range(len(parts)):
-                sub = "/".join(parts[i:])
-                if fnmatch.fnmatch(sub, pat) or fnmatch.fnmatch(sub + "/", pat + "/"):
-                    return True
         return False
+
+
+def path_is_ignored(path: str, chain: Tuple[GitignoreParser, ...]) -> bool:
+    ignored = False
+    for gi in chain:
+        if not gi.rules or not path.startswith(gi.prefix):
+            continue
+        rel_str = path[len(gi.prefix):].replace(os.sep, "/")
+        rel_dir = rel_str + "/"
+        parts = rel_str.split("/")
+        for pat, is_negation in gi.rules:
+            if GitignoreParser._match(rel_str, rel_dir, pat, parts):
+                ignored = not is_negation
+    return ignored
 
 
 APP_CSS = """
@@ -522,42 +459,47 @@ def copy_to_clipboard(content: str) -> bool:
         return False
 
 
-SYSTEM_ANALYST = """You are a senior code analyst. Analyze the provided file and extract:
-- Purpose: what this file does
-- Key symbols: functions, classes, variables that matter
-- Dependencies: imports, external libraries, internal modules it relies on
-- Logic: non-obvious patterns, algorithms, or architectural decisions
+SYSTEM_ANALYST = """You are a senior code analyst producing a structured summary of one file for another AI's context window. Output exactly these sections, in this order, omitting any section with nothing to report:
+
+Purpose: one to two sentences — what this file does and why it exists.
+Key symbols: functions, classes, exported constants that matter to callers. Name plus one-line role each. Skip trivial getters/setters and obvious boilerplate.
+Dependencies: imports and what they're used for; internal modules this file couples to.
+Logic: non-obvious algorithms, invariants, side effects, error handling, or architectural decisions a new contributor would miss by skimming.
+
 Rules:
-- Be concise. Use bullets.
-- No line numbers.
-- Skip obvious structural observations.
-- For config/data files, describe what they configure and which values are critical.
+- Bullets only, no prose paragraphs.
+- Never restate code verbatim or narrate what's visible on the screen.
+- Never pad with generic filler ("this file contains code", "imports bring in dependencies").
+- For config/data files: state what they configure, which values are load-bearing, and what breaks if they're wrong.
+- If the file is trivial (barrel export, empty __init__, generated file), say so in one line and stop.
 """
 
-SYSTEM_ARCHITECT = """You are a senior software architect. Synthesize the directory tree and file analyses into a project overview.
-Cover:
-1. Technology stack (languages, frameworks, major libraries)
-2. Architecture (pattern, how components interact)
-3. Core functionality (what this project does)
-4. Entry points and data flow
+SYSTEM_ARCHITECT = """You are a senior software architect writing the orientation a new engineer gets on day one. Using the directory tree and per-file analyses, write a PROJECT SUMMARY with these sections:
+
+Stack: languages, frameworks, and libraries that actually shape design decisions. Skip incidental dependencies.
+Architecture: the pattern in use, how major components communicate, where state lives.
+Entry points & data flow: where execution starts, how input travels through the system.
+Watch out for: non-obvious coupling, implicit conventions, or footguns visible in the analyses — omit entirely if nothing qualifies.
+
 Rules:
-- 3-5 paragraphs max.
-- Direct technical prose. No fluff.
-- Focus on what a new developer needs to be productive immediately.
+- Direct technical prose, 3-5 short paragraphs, no per-file recap.
+- State what's actually true of this codebase — never generic architecture commentary.
+- If the analyses don't support a claim, say so instead of guessing.
 """
 
-SYSTEM_PROMPT_ENGINEER = """You are an expert prompt engineer. Generate a system prompt for an AI coding assistant working on this specific project.
-The prompt must:
-1. Define the AI's role as an expert collaborator on this codebase
-2. Summarize the project's purpose, stack, and architecture in 2-3 sentences
-3. List key conventions (naming, structure, idioms) the AI must follow
-4. State what the AI should always do (use existing utilities, follow patterns, write idiomatic code)
-5. State what the AI must never do (add dependencies without approval, break interfaces, duplicate utilities)
-6. Include the directory layout so the AI knows where files live
+SYSTEM_PROMPT_ENGINEER = """You are an expert prompt engineer producing a system prompt that another AI coding assistant will load before touching this codebase. Write it in second person, addressed to that assistant, structured exactly as:
+
+1. Role — one or two sentences establishing it as an expert collaborator on this specific codebase.
+2. Project — what this project is, its stack, its architecture, in 2-3 sentences pulled from the analyses, not boilerplate.
+3. Conventions — naming, structure, and idioms actually observed in the analyses. Name the pattern and where it shows up.
+4. Always — concrete, checkable behaviors: reuse existing utilities instead of duplicating them, match observed patterns, follow the established file layout for new files.
+5. Never — concrete failure modes: don't add a dependency without checking one isn't already used for that purpose, don't break an existing interface, don't duplicate a utility that already exists.
+6. Layout — the directory tree, so the assistant knows where things live without exploring first.
+
 Rules:
-- Second person ("You are...", "You must...", "Never...").
-- Specific to this project. No generic advice.
-- Immediately usable in Cursor, Claude, Copilot Chat, etc.
+- Every instruction must be specific enough to verify against this codebase. No advice that would apply to any project.
+- If the analyses don't support a section with something specific, keep that section short — never invent detail.
+- Output the prompt itself only. No preamble, no "Here is a system prompt", no meta-commentary, nothing before section 1 or after section 6.
 - Under 600 words.
 """
 
@@ -676,22 +618,19 @@ class LLMClient:
 
 
 def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
-    ext = Path(filepath).suffix.lower()
+    ext = os.path.splitext(filepath)[1].lower()
     try:
-        size = os.path.getsize(filepath)
-        if size > MAX_FILE_SIZE_BYTES:
-            return {
-                "path": filepath, "type": ext, "is_binary": False,
-                "content": None, "skipped": True, "reason": f"too large ({size // 1024}KB)",
-            }
         with open(filepath, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            if size > MAX_FILE_SIZE_BYTES:
+                return {
+                    "path": filepath, "type": ext, "is_binary": False,
+                    "content": None, "skipped": True, "reason": f"too large ({size // 1024}KB)",
+                }
             header = f.read(8192)
             if any(header.startswith(m) for m in BINARY_MARKERS) or b'\x00' in header:
                 return {"path": filepath, "type": ext, "is_binary": True, "content": None, "skipped": False}
-            if size <= 8192:
-                raw = header
-            else:
-                raw = header + f.read()
+            raw = header if size <= 8192 else header + f.read()
         content = raw.decode("utf-8", errors="ignore")
         return {"path": filepath, "type": ext, "is_binary": False, "content": content, "skipped": False}
     except PermissionError:
@@ -705,59 +644,69 @@ def _read_file_sync(filepath: str) -> Optional[Dict[str, Any]]:
 
 class ProjectScanner:
     async def scan(self, path: str, log: RichLog) -> Tuple[str, List[Dict[str, Any]]]:
+        loop = asyncio.get_running_loop()
         log.write("[bold cyan]Walking directory tree...[/bold cyan]")
-        tree, file_paths = await asyncio.to_thread(self._build_tree, path)
+        tree, file_paths = await loop.run_in_executor(IO_EXECUTOR, self._build_tree, path)
         log.write(f"[bold cyan]Reading {len(file_paths)} files...[/bold cyan]")
-        files = await self._read_files(file_paths)
+        files = await self._read_files(file_paths, loop)
         return tree, files
 
     def _build_tree(self, path: str) -> Tuple[str, List[str]]:
-        base = Path(path).resolve()
-        gitignore = GitignoreParser(str(base))
-        tree_lines = []
-        file_paths = []
+        base = str(Path(path).resolve())
+        tree_lines: List[str] = []
+        file_paths: List[str] = []
 
-        def walk(dirpath: str, prefix: str):
+        def walk(dirpath: str, prefix: str, gitignores: Tuple[GitignoreParser, ...]):
             try:
-                entries = sorted(os.scandir(dirpath), key=lambda e: (not e.is_dir(), e.name.lower()))
-            except PermissionError:
+                raw_entries = list(os.scandir(dirpath))
+            except (PermissionError, OSError):
                 return
 
-            filtered = []
-            for entry in entries:
-                if entry.is_dir(follow_symlinks=False):
-                    if entry.name in IGNORED_DIRS:
-                        continue
-                    if gitignore.is_ignored(entry.path):
-                        continue
-                    filtered.append(entry)
-                elif entry.is_file(follow_symlinks=False):
-                    ext = Path(entry.name).suffix.lower()
-                    if ext in IGNORED_EXT:
-                        continue
-                    if gitignore.is_ignored(entry.path):
-                        continue
-                    filtered.append(entry)
+            local_gi = GitignoreParser(dirpath)
+            active = gitignores + (local_gi,) if local_gi.rules else gitignores
 
-            for i, entry in enumerate(filtered):
+            filtered: List[Tuple[os.DirEntry, bool]] = []
+            for entry in raw_entries:
+                name = entry.name
+                if name == ".gitignore":
+                    continue
+                is_dir = entry.is_dir(follow_symlinks=False)
+                if is_dir:
+                    if name in IGNORED_DIRS:
+                        continue
+                    if active and path_is_ignored(entry.path, active):
+                        continue
+                    filtered.append((entry, True))
+                elif entry.is_file(follow_symlinks=False):
+                    if name in IGNORED_FILES:
+                        continue
+                    if os.path.splitext(name)[1].lower() in IGNORED_EXT:
+                        continue
+                    if active and path_is_ignored(entry.path, active):
+                        continue
+                    filtered.append((entry, False))
+
+            filtered.sort(key=lambda t: (not t[1], t[0].name.lower()))
+
+            for i, (entry, is_dir) in enumerate(filtered):
                 is_last = i == len(filtered) - 1
                 connector = "└── " if is_last else "├── "
                 tree_lines.append(f"{prefix}{connector}{entry.name}")
-                if entry.is_dir():
+                if is_dir:
                     child_prefix = prefix + ("    " if is_last else "│   ")
-                    walk(entry.path, child_prefix)
+                    walk(entry.path, child_prefix, active)
                 else:
                     file_paths.append(entry.path)
 
-        walk(str(base), "")
+        walk(base, "", ())
         return "\n".join(tree_lines), file_paths
 
-    async def _read_files(self, file_paths: List[str]) -> List[Dict[str, Any]]:
-        sem = asyncio.Semaphore(50)
+    async def _read_files(self, file_paths: List[str], loop: asyncio.AbstractEventLoop) -> List[Dict[str, Any]]:
+        sem = asyncio.Semaphore(IO_WORKERS * 2)
 
         async def read_one(fp: str) -> Optional[Dict[str, Any]]:
             async with sem:
-                return await asyncio.to_thread(_read_file_sync, fp)
+                return await loop.run_in_executor(IO_EXECUTOR, _read_file_sync, fp)
 
         results = await asyncio.gather(*[read_one(fp) for fp in file_paths])
         return [r for r in results if r is not None]
@@ -796,11 +745,8 @@ class FileAnalyzer:
             chunks = [content[i:i + CHUNK_SIZE] for i in range(0, len(content), CHUNK_SIZE)]
 
             async def analyze_chunk(ci: int, chunk: str) -> str:
-                prompt = (
-                    "Analyze this code/text. Concisely extract:\n"
-                    "- Purpose\n- Key functions/classes\n- Dependencies\n- Important logic\n\n"
-                    f"File: {name}\nContent:\n{chunk}"
-                )
+                chunk_note = f" (chunk {ci+1}/{len(chunks)} — partial content, not the whole file)" if len(chunks) > 1 else ""
+                prompt = f"File: {name}{chunk_note}\nContent:\n{chunk}"
                 async with self._sem:
                     self.log.write(
                         f"  [[bold]{idx+1}/{total}[/bold]] {name}"

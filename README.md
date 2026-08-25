@@ -43,6 +43,7 @@ Paste it once. Your AI assistant is now a collaborator who actually knows the co
 - **Fast file I/O** — optimized reading with binary detection and concurrent disk access
 - **Cross-platform** — runs natively on Linux, macOS, and Windows with platform-specific clipboard and path handling
 - **Open with AI** — one-click buttons open Claude, ChatGPT, Gemini, Grok, and more directly in your browser
+- **Team share link** — upload the prompt as a private GitHub Gist and copy a link for your teammates
 - **Token estimator** — shows approximate token count before you paste
 - **Saves your config** — API keys, provider, model, and preferred AI are remembered between runs
 - **Terminal UI** — fully interactive TUI built with Textual, no browser required

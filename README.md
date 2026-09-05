@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-active-black.svg)]()
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows-lightgrey.svg)]()
-[![Made by 669px](https://img.shields.io/badge/made%20by-669px-purple.svg)](https://github.com/669px)
+[![Made by byte4day](https://img.shields.io/badge/made%20by-byte4day-purple.svg)](https://github.com/byte4day)
 
 pxForge scans your project recursively, analyzes every file with an LLM, and outputs a structured context document you can drop directly into any AI coding assistant — Claude, ChatGPT, Gemini, or Cursor.
 
@@ -70,7 +70,7 @@ sudo apt install -y git xclip          # X11
 sudo apt install -y git wl-clipboard   # Wayland
 
 # Clone and install
-git clone https://github.com/669px/pxforge.git
+git clone https://github.com/byte4day/PxForge.git
 cd pxforge
 pip install -r requirements.txt
 python3 pxforge.py install
@@ -83,7 +83,7 @@ sudo pacman -S git xclip     # X11
 # or
 sudo pacman -S git wl-clipboard  # Wayland
 
-git clone https://github.com/669px/pxforge.git
+git clone https://github.com/byte4day/PxForge.git
 cd pxforge
 pip install -r requirements.txt
 python3 pxforge.py install
@@ -94,7 +94,7 @@ python3 pxforge.py install
 ```bash
 sudo dnf install -y git xclip
 
-git clone https://github.com/669px/pxforge.git
+git clone https://github.com/byte4day/PxForge.git
 cd pxforge
 pip install -r requirements.txt
 python3 pxforge.py install
@@ -120,7 +120,7 @@ The `install` command writes a wrapper script to `~/.local/bin/pxforge` and adds
 # Install Python if needed
 brew install python git
 
-git clone https://github.com/669px/pxforge.git
+git clone https://github.com/byte4day/PxForge.git
 cd pxforge
 pip3 install -r requirements.txt
 python3 pxforge.py install
@@ -130,7 +130,7 @@ source ~/.zshrc
 **Without Homebrew**
 
 ```bash
-git clone https://github.com/669px/pxforge.git
+git clone https://github.com/byte4day/PxForge.git
 cd pxforge
 pip install -r requirements.txt
 python pxforge.py install
@@ -151,7 +151,7 @@ Open PowerShell as a regular user (no admin required):
 # Install Python from the Microsoft Store or python.org if not already installed
 # Then:
 
-git clone https://github.com/669px/pxforge.git
+git clone https://github.com/byte4day/PxForge.git
 cd pxforge
 pip install -r requirements.txt
 python pxforge.py install
@@ -168,7 +168,7 @@ pxforge .
 If you have WSL2 set up, the Linux install path works identically inside your WSL environment. Clipboard integration between WSL and Windows requires `clip.exe`, which is available by default in WSL2.
 
 ```bash
-git clone https://github.com/669px/pxforge.git
+git clone https://github.com/byte4day/PxForge.git
 cd pxforge
 pip install -r requirements.txt
 python3 pxforge.py install
@@ -178,7 +178,7 @@ source ~/.bashrc
 **Option 3 — CMD**
 
 ```cmd
-git clone https://github.com/669px/pxforge.git
+git clone https://github.com/byte4day/PxForge.git
 cd pxforge
 pip install -r requirements.txt
 python pxforge.py install
@@ -401,7 +401,7 @@ pxForge exists because pasting context into AI assistants manually is tedious, e
 
 ## License
 
-MIT License — Copyright (c) 2026 [669px](https://github.com/669px)
+MIT License — Copyright (c) 2026 [byte4day](https://github.com/byte4day)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 

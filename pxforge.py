@@ -778,7 +778,7 @@ class LLMClient:
             return {
                 **base,
                 "Authorization": f"Bearer {self.api_key}",
-                "HTTP-Referer": "https://github.com/669px/pxforge",
+                "HTTP-Referer": "https://github.com/byte4day/PxForge",
                 "X-Title": "pxForge",
             }
         return {**base, "Authorization": f"Bearer {self.api_key}"}
